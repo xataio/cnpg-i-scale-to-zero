@@ -1,0 +1,15 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: cluster-example
+  annotations:
+    xata.io/scale-to-zero-enabled: "true"
+    xata.io/scale-to-zero-inactivity-minutes: "2"
+spec:
+  instances: 2
+
+  plugins:
+  - name: cnpg-i-scale-to-zero.xata.io
+
+  storage:
+    size: 1Gi
