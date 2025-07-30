@@ -101,6 +101,7 @@ jobs:
         with:
           context: .
           file: ./Dockerfile.plugin
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta-plugin.outputs.tags }}
           labels: ${{ steps.meta-plugin.outputs.labels }}
@@ -112,6 +113,7 @@ jobs:
         with:
           context: .
           file: ./Dockerfile.sidecar
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta-sidecar.outputs.tags }}
           labels: ${{ steps.meta-sidecar.outputs.labels }}
@@ -144,9 +146,21 @@ jobs:
         run: make manifest
 
       - name: Upload manifest artifact
+        if: github.event_name != 'release'
         uses: actions/upload-artifact@v4
         with:
-          name: kubernetes-manifest${{ github.event_name == 'release' && '' || '-main' }}
+          name: kubernetes-manifest-main
           path: |
             manifest.yaml
-          retention-days: 30
+          retention-days: 7
+
+      - name: Upload manifest to release
+        if: github.event_name == 'release'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: ./manifest.yaml
+          asset_name: manifest.yaml
+          asset_content_type: application/x-yaml
