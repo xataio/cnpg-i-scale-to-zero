@@ -121,7 +121,7 @@ func (r *cnpgClusterClient) getClusterCredentials(ctx context.Context) (*postgre
 		port:     port,
 	}
 
-	log.FromContext(ctx).Info("Retrieved PostgreSQL credentials", "connection_string", creds.connString())
+	log.FromContext(ctx).Info("Retrieved PostgreSQL credentials")
 
 	return creds, nil
 }
