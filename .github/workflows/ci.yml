@@ -52,13 +52,17 @@ jobs:
         with:
           version: v2.1.0
 
-  docker:
+  build-docker-images:
     runs-on: ubuntu-latest
     needs: [test, lint]
     if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'release'
     permissions:
       contents: read
       packages: write
+    strategy:
+      matrix:
+        platform: [linux/amd64, linux/arm64]
+        image: [plugin, sidecar]
 
     steps:
       - name: Checkout code
@@ -74,55 +78,85 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata for plugin image
-        id: meta-plugin
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PLUGIN }}
-          tags: |
-            type=raw,value=main,enable={{is_default_branch}}
-            type=sha,prefix={{branch}}-
-            type=ref,event=tag
-            type=raw,value=latest,enable=${{ github.event_name == 'release' }}
+      - name: Extract platform name
+        id: platform
+        run: echo "name=$(echo ${{ matrix.platform }} | tr '/' '-')" >> $GITHUB_OUTPUT
 
-      - name: Extract metadata for sidecar image
-        id: meta-sidecar
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_SIDECAR }}
-          tags: |
-            type=raw,value=main,enable={{is_default_branch}}
-            type=sha,prefix={{branch}}-
-            type=ref,event=tag
-            type=raw,value=latest,enable=${{ github.event_name == 'release' }}
+      - name: Set image variables
+        id: image
+        run: |
+          if [ "${{ matrix.image }}" = "plugin" ]; then
+            echo "dockerfile=./Dockerfile.plugin" >> $GITHUB_OUTPUT
+            echo "name=${{ env.IMAGE_NAME_PLUGIN }}" >> $GITHUB_OUTPUT
+          else
+            echo "dockerfile=./Dockerfile.sidecar" >> $GITHUB_OUTPUT
+            echo "name=${{ env.IMAGE_NAME_SIDECAR }}" >> $GITHUB_OUTPUT
+          fi
 
-      - name: Build and push plugin Docker image
+      - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./Dockerfile.plugin
-          platforms: linux/amd64,linux/arm64
+          file: ${{ steps.image.outputs.dockerfile }}
+          platforms: ${{ matrix.platform }}
           push: true
-          tags: ${{ steps.meta-plugin.outputs.tags }}
-          labels: ${{ steps.meta-plugin.outputs.labels }}
+          tags: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${{ env.IMAGE_TAG }}-${{ steps.platform.outputs.name }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Build and push sidecar Docker image
-        uses: docker/build-push-action@v5
+  build-docker-manifests:
+    runs-on: ubuntu-latest
+    needs: [build-docker-images]
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'release'
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        image: [plugin, sidecar]
+
+    steps:
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
         with:
-          context: .
-          file: ./Dockerfile.sidecar
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta-sidecar.outputs.tags }}
-          labels: ${{ steps.meta-sidecar.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Set image variables
+        id: image
+        run: |
+          if [ "${{ matrix.image }}" = "plugin" ]; then
+            echo "name=${{ env.IMAGE_NAME_PLUGIN }}" >> $GITHUB_OUTPUT
+          else
+            echo "name=${{ env.IMAGE_NAME_SIDECAR }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create and push manifest
+        run: |
+          docker buildx imagetools create -t ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${{ env.IMAGE_TAG }} \
+            ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${{ env.IMAGE_TAG }}-linux-amd64 \
+            ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${{ env.IMAGE_TAG }}-linux-arm64
+
+          # Also create latest tag for releases
+          if [ "${{ github.event_name }}" = "release" ]; then
+            docker buildx imagetools create -t ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:latest \
+              ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${{ env.IMAGE_TAG }}-linux-amd64 \
+              ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${{ env.IMAGE_TAG }}-linux-arm64
+          fi
+
+      - name: Clean up temporary platform images
+        run: |
+          # Delete temporary platform-specific tags since we now have multi-platform manifests
+          docker buildx imagetools delete ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${{ env.IMAGE_TAG }}-linux-amd64 || true
+          docker buildx imagetools delete ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${{ env.IMAGE_TAG }}-linux-arm64 || true
 
   manifest:
     runs-on: ubuntu-latest
-    needs: [docker]
+    needs: [build-docker-manifests]
     if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'release'
 
     steps:
