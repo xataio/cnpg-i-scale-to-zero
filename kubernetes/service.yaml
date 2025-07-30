@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: scale-to-zero
+    cnpg.io/pluginName: cnpg-i-scale-to-zero.xata.io
+  annotations:
+    cnpg.io/pluginClientSecret: scaletozero-client-tls
+    cnpg.io/pluginServerSecret: scaletozero-server-tls
+    cnpg.io/pluginPort: "9090"
+  name: scale-to-zero
+spec:
+  ports:
+  - port: 9090
+    protocol: TCP
+    targetPort: 9090
+    name: grpc
+  selector:
+    app: scale-to-zero

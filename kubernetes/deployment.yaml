@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: scale-to-zero
+  name: scale-to-zero
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: scale-to-zero
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app: scale-to-zero
+    spec:
+      serviceAccountName: cnpg-scale-to-zero-plugin
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+      containers:
+      - name: cnpg-i-scale-to-zero
+      # TODO: replace with environment variable for image
+        image: cnpg-i-scale-to-zero:latest
+        # Remove once we have the image from the env variable. If the image tag
+        # is :latest, the imagePullPolicy will be automatically set to Always.
+        # If the image tag isn’t :latest, the imagePullPolicy will be
+        # automatically set to IfNotPresent.
+        # Currently set to Never for testing purposes.  
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 9090
+          protocol: TCP
+          name: grpc
+        args:
+        - plugin
+        - --server-cert=/server/tls.crt
+        - --server-key=/server/tls.key
+        - --client-cert=/client/tls.crt
+        - --server-address=:9090
+        volumeMounts:
+        - mountPath: /server
+          name: server
+        - mountPath: /client
+          name: client
+        resources: {}
+        livenessProbe:
+          grpc:
+            port: 9090
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          grpc:
+            port: 9090
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+      volumes:
+      - name: server
+        secret:
+          secretName: scaletozero-server-tls
+      - name: client
+        secret:
+          secretName: scaletozero-client-tls
