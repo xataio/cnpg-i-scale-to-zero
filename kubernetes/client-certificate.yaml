@@ -11,6 +11,6 @@ spec:
   usages:
     - client auth
   issuerRef:
-    name: selfsigned-issuer
+    name: cnpg-scale-to-zero-selfsigned-issuer
     kind: Issuer
     group: cert-manager.io
