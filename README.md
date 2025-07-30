@@ -23,6 +23,27 @@ Quick start:
 kubectl apply -f manifest.yaml
 ```
 
+## Container Images
+
+The plugin consists of two container images:
+
+- **Plugin**: `ghcr.io/xataio/cnpg-i-scale-to-zero`
+- **Sidecar**: `ghcr.io/xataio/cnpg-i-scale-to-zero-sidecar`
+
+### Image Tags
+
+We publish different image tags for different use cases:
+
+#### Development Tags
+
+- `main`: Latest development build from the main branch
+- `main-<sha>`: Specific commit builds from main branch
+
+#### Release Tags
+
+- `latest`: Latest stable release
+- `v1.0.0`, `v1.1.0`, etc.: Specific version releases
+
 ## Usage
 
 Enable scale-to-zero for a PostgreSQL cluster by adding the plugin and configuration annotations:

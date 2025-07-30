@@ -12,6 +12,7 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME_PLUGIN: ${{ github.repository }}
   IMAGE_NAME_SIDECAR: ${{ github.repository }}-sidecar
+  IMAGE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || 'main' }}
 
 jobs:
   test:
@@ -77,8 +78,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PLUGIN }}
           tags: |
-            type=ref,event=branch,suffix=-dev
-            type=raw,value=latest-dev,enable={{is_default_branch}}
+            type=raw,value=main,enable={{is_default_branch}}
             type=sha,prefix={{branch}}-
             type=ref,event=tag
             type=raw,value=latest,enable=${{ github.event_name == 'release' }}
@@ -89,8 +89,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_SIDECAR }}
           tags: |
-            type=ref,event=branch,suffix=-dev
-            type=raw,value=latest-dev,enable={{is_default_branch}}
+            type=raw,value=main,enable={{is_default_branch}}
             type=sha,prefix={{branch}}-
             type=ref,event=tag
             type=raw,value=latest,enable=${{ github.event_name == 'release' }}
@@ -120,7 +119,7 @@ jobs:
   manifest:
     runs-on: ubuntu-latest
     needs: [docker]
-    if: github.event_name == 'release'
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'release'
 
     steps:
       - name: Checkout code
@@ -131,6 +130,14 @@ jobs:
           curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
           sudo mv kustomize /usr/local/bin/
 
+      - name: Update kustomization with image tag
+        run: |
+          # Update the plugin image tag in kustomization.yaml
+          sed -i "s/newTag: main/newTag: ${{ env.IMAGE_TAG }}/g" kubernetes/kustomization.yaml
+
+          # Update the secret generator value to use the correct sidecar tag
+          sed -i "s|ghcr.io/xataio/cnpg-i-scale-to-zero-sidecar:main|ghcr.io/xataio/cnpg-i-scale-to-zero-sidecar:${{ env.IMAGE_TAG }}|g" kubernetes/kustomization.yaml
+
       - name: Generate manifest
         run: make manifest
 
@@ -140,7 +147,7 @@ jobs:
       - name: Upload manifest artifact
         uses: actions/upload-artifact@v4
         with:
-          name: kubernetes-manifest
+          name: kubernetes-manifest${{ github.event_name == 'release' && '' || '-main' }}
           path: |
             manifest.yaml
           retention-days: 30
