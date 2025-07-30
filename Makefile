@@ -13,7 +13,7 @@ lint: ## Lint source code
 
 .PHONY: test
 test: ## Run tests with coverage
-	@go test -coverprofile=coverage -timeout 10m -race -cover -failfast ./...
+	@go test -timeout 10m -race -cover -failfast ./...
 
 .PHONY: build
 build: ## Build plugin and sidecar binaries
@@ -73,7 +73,7 @@ clean: ## Clean build artifacts
 .PHONY: kind-load-sidecar
 kind-load-sidecar: docker-build-sidecar ## Build and load Docker sidecar images into kind cluster
 	@echo "Loading sidecar image into kind cluster..."
-	@kind load docker-image cnpg-scale-to-zero-sidecar:latest || echo "Failed to load sidecar image (kind cluster may not exist)"	
+	@kind load docker-image cnpg-scale-to-zero-sidecar:latest || echo "Failed to load sidecar image (kind cluster may not exist)"
 
 .PHONY: kind-load-plugin
 kind-load-plugin: docker-build-plugin ## Build and load Docker plugin images into kind cluster
@@ -91,4 +91,3 @@ kind-deploy: kind-load deploy ## Build, load images to kind, and deploy to clust
 
 .PHONY: all
 all: lint test build docker-build ## Run all quality checks and build everything
-

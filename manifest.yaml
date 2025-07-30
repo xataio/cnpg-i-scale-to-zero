@@ -48,6 +48,15 @@ subjects:
   namespace: cnpg-system
 ---
 apiVersion: v1
+data:
+  SIDECAR_IMAGE: Z2hjci5pby94YXRhaW8vY25wZy1pLXNjYWxlLXRvLXplcm8tc2lkZWNhcjptYWlu
+kind: Secret
+metadata:
+  name: scale-to-zero-config-tcb898m758
+  namespace: cnpg-system
+type: Opaque
+---
+apiVersion: v1
 kind: Service
 metadata:
   annotations:
@@ -93,8 +102,10 @@ spec:
         - --server-key=/server/tls.key
         - --client-cert=/client/tls.crt
         - --server-address=:9090
-        image: cnpg-i-scale-to-zero:latest
-        imagePullPolicy: Never
+        envFrom:
+        - secretRef:
+            name: scale-to-zero-config-tcb898m758
+        image: ghcr.io/xataio/cnpg-i-scale-to-zero:main
         livenessProbe:
           failureThreshold: 3
           grpc:

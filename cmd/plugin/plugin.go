@@ -7,8 +7,10 @@ import (
 	"github.com/cloudnative-pg/cnpg-i/pkg/lifecycle"
 	"github.com/cloudnative-pg/machinery/pkg/log"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	"google.golang.org/grpc"
 
+	"github.com/xataio/cnpg-i-scale-to-zero/internal/config"
 	"github.com/xataio/cnpg-i-scale-to-zero/internal/plugin/identity"
 	lifecycleImpl "github.com/xataio/cnpg-i-scale-to-zero/internal/plugin/lifecycle"
 )
@@ -21,10 +23,14 @@ func main() {
 		Use:   "cnpg-i-scale-to-zero",
 		Short: "A plugin to scale to zero for CloudNativePG",
 		PersistentPreRun: func(cmd *cobra.Command, _ []string) {
+			log.SetLogLevel(viper.GetString("log-level"))
 			logFlags.ConfigureLogging()
 			cmd.SetContext(log.IntoContext(cmd.Context(), log.GetLogger()))
 		},
 	}
+
+	_ = viper.BindEnv("sidecar-image", "SIDECAR_IMAGE")
+	_ = viper.BindEnv("log-level", "LOG_LEVEL")
 
 	logFlags.AddFlags(rootCmd.PersistentFlags())
 
@@ -39,8 +45,11 @@ func main() {
 // NewCmd creates the `plugin` command
 func newCmd() *cobra.Command {
 	cmd := http.CreateMainCmd(identity.Implementation{}, func(server *grpc.Server) error {
+		// Create config at execution time to ensure viper has loaded environment variables
+		cfg := config.New(viper.GetString("sidecar-image"), viper.GetString("log-level"))
+
 		// Register the declared implementations
-		lifecycle.RegisterOperatorLifecycleServer(server, lifecycleImpl.Implementation{})
+		lifecycle.RegisterOperatorLifecycleServer(server, lifecycleImpl.NewImplementation(cfg))
 		return nil
 	})
 
