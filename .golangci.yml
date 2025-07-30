@@ -1,0 +1,85 @@
+version: "2"
+run:
+  go: "1.24"
+linters:
+  default: none
+  enable:
+    - copyloopvar
+    - errorlint
+    - forbidigo
+    - forcetypeassert
+    - gochecksumtype
+    - goconst
+    - gocritic
+    - gosec
+    - govet
+    - ineffassign
+    - makezero
+    - misspell
+    - nakedret
+    - nolintlint
+    - prealloc
+    - staticcheck
+    - unused
+  settings:
+    errorlint:
+      errorf: true
+    forbidigo:
+      forbid:
+        - pattern: fmt.Print*
+    goconst:
+      numbers: true
+    gocritic:
+      disabled-checks:
+        - exitAfterDefer
+        - ifElseChain
+        - commentFormatting
+    gomodguard:
+      blocked:
+        modules:
+          - github.com/pkg/errors:
+              recommendations:
+                - errors
+                - fmt
+              reason: This package is deprecated, use `fmt.Errorf` with `%w` instead
+    gosec:
+      excludes:
+        - G115 # Potential integer overflow when converting between integer types
+        - G108 # Profiling endpoint automatically exposed on /debug/pprof
+      severity: low
+    makezero:
+      always: false
+    staticcheck:
+      checks:
+        - -SA1019
+        - -ST1000
+        - -ST1005
+        - all
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - goconst
+        path: (.+)_test\.go
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gofumpt
+  settings:
+    gofumpt:
+      module-path: cnpg-i-scale-to-zero
+      extra-rules: false
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
