@@ -1,2 +1,98 @@
-# cnpg-i-scale-to-zero
-CNPG plugin to manage scale to zero functionality
+# 0️⃣ CNPG-I Scale-to-Zero Plugin
+
+A [CNPG-I](https://github.com/cloudnative-pg/cnpg-i) plugin that automatically hibernates inactive [CloudNativePG](https://github.com/cloudnative-pg/cloudnative-pg/) clusters to optimize resource usage and reduce costs.
+
+## Overview
+
+This plugin monitors PostgreSQL database activity and automatically scales clusters down to zero replicas when they've been inactive for a configurable period. It injects a monitoring sidecar into the primary PostgreSQL pod that tracks database connections and query activity, then hibernates the cluster by setting the `cnpg.io/hibernation` annotation when the inactivity threshold is reached.
+
+### How It Works
+
+1. **Sidecar Injection**: Automatically adds a monitoring sidecar to the primary PostgreSQL pod
+2. **Activity Monitoring**: The sidecar periodically checks for active database connections and recent queries
+3. **Automatic Hibernation**: When the cluster is inactive for the configured duration, it sets the hibernation annotation
+4. **Resource Optimization**: Inactive clusters are scaled to zero, freeing up cluster resources
+
+## Installation
+
+For detailed installation instructions, see [INSTALL.md](INSTALL.md).
+
+Quick start:
+
+```bash
+kubectl apply -f manifest.yaml
+```
+
+## Usage
+
+Enable scale-to-zero for a PostgreSQL cluster by adding the plugin and configuration annotations:
+
+```yaml
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: my-cluster
+  annotations:
+    xata.io/scale-to-zero-enabled: "true"
+    xata.io/scale-to-zero-inactivity-minutes: "10"
+spec:
+  instances: 3
+  plugins:
+    - name: cnpg-i-scale-to-zero.xata.io
+  storage:
+    size: 1Gi
+```
+
+### Configuration
+
+The plugin behavior is configured through cluster annotations:
+
+- `xata.io/scale-to-zero-enabled`: Set to `"true"` to enable scale-to-zero functionality
+- `xata.io/scale-to-zero-inactivity-minutes`: Sets the inactivity threshold in minutes before hibernation (default: 30 minutes)
+
+The plugin automatically manages the `cnpg.io/hibernation` annotation to trigger cluster hibernation.
+
+See the [cluster example](doc/examples/cluster-example.yaml) for a complete configuration.
+
+## Monitoring and Observability
+
+The plugin provides logging to help monitor its operation:
+
+- Sidecar injection events are logged during pod creation
+- Activity monitoring status is logged at each check interval
+- Hibernation events are logged when clusters are scaled down
+
+You can view the plugin logs using:
+
+```shell
+kubectl logs -n cnpg-system deployment/cnpg-i-scale-to-zero-plugin
+```
+
+And monitor the sidecar logs in the PostgreSQL pods:
+
+```shell
+kubectl logs <pod-name> -c scale-to-zero
+```
+
+## Development
+
+For local development and building from source:
+
+```bash
+# Build binaries
+make build
+
+# Build Docker images
+make docker-build
+
+# Run tests and linting
+make test
+make lint
+
+# Local development with kind
+make kind-deploy
+```
+
+This plugin uses the [pluginhelper](https://github.com/cloudnative-pg/cnpg-i-machinery/tree/main/pkg/pluginhelper) from [`cnpg-i-machinery`](https://github.com/cloudnative-pg/cnpg-i-machinery) to simplify the plugin's implementation.
+
+For additional details on the plugin implementation, refer to the [development documentation](doc/development.md).
