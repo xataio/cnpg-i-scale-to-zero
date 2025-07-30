@@ -11,11 +11,23 @@ import (
 	"github.com/cloudnative-pg/cnpg-i/pkg/lifecycle"
 	"github.com/cloudnative-pg/machinery/pkg/log"
 	corev1 "k8s.io/api/core/v1"
+
+	"github.com/xataio/cnpg-i-scale-to-zero/internal/config"
 )
 
 // Implementation is the implementation of the lifecycle handler
 type Implementation struct {
 	lifecycle.UnimplementedOperatorLifecycleServer
+	logLevel     string
+	sidecarImage string
+}
+
+// NewImplementation creates a new lifecycle implementation with the given config
+func NewImplementation(cfg *config.Config) *Implementation {
+	return &Implementation{
+		logLevel:     cfg.LogLevel,
+		sidecarImage: cfg.SidecarImage,
+	}
 }
 
 // GetCapabilities exposes the lifecycle capabilities
@@ -91,10 +103,8 @@ func (impl Implementation) reconcileMetadata(
 
 	logger.Info("injecting environment variables into sidecar", "namespace", pod.Namespace, "cluster name", cluster.Name, "pod name", pod.Name)
 	err = object.InjectPluginSidecar(mutatedPod, &corev1.Container{
-		Name: "scale-to-zero",
-		// TODO: replace with environment variable
-		Image:           "cnpg-scale-to-zero-sidecar:latest",
-		ImagePullPolicy: corev1.PullIfNotPresent,
+		Name:  "scale-to-zero",
+		Image: impl.sidecarImage,
 		Env: []corev1.EnvVar{
 			{
 				Name:  "NAMESPACE",
@@ -110,7 +120,7 @@ func (impl Implementation) reconcileMetadata(
 			},
 			{
 				Name:  "LOG_LEVEL",
-				Value: "info",
+				Value: impl.logLevel,
 			},
 		},
 	}, false)

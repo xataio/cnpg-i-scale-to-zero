@@ -23,14 +23,7 @@ spec:
         fsGroup: 10001
       containers:
       - name: cnpg-i-scale-to-zero
-      # TODO: replace with environment variable for image
-        image: cnpg-i-scale-to-zero:latest
-        # Remove once we have the image from the env variable. If the image tag
-        # is :latest, the imagePullPolicy will be automatically set to Always.
-        # If the image tag isn’t :latest, the imagePullPolicy will be
-        # automatically set to IfNotPresent.
-        # Currently set to Never for testing purposes.  
-        imagePullPolicy: Never
+        image: cnpg-i-scale-to-zero
         ports:
         - containerPort: 9090
           protocol: TCP
@@ -41,6 +34,11 @@ spec:
         - --server-key=/server/tls.key
         - --client-cert=/client/tls.crt
         - --server-address=:9090
+        envFrom:
+        # use a secret instead of an env variable to configure the sidecar image
+        # so that the image mapping works out of the box
+        - secretRef:
+            name: scale-to-zero-config
         volumeMounts:
         - mountPath: /server
           name: server

@@ -10,3 +10,9 @@ resources:
 - service.yaml
 images:
 - name: cnpg-i-scale-to-zero
+  newName: ghcr.io/xataio/cnpg-i-scale-to-zero
+  newTag: main
+secretGenerator:
+- literals:
+  - SIDECAR_IMAGE=ghcr.io/xataio/cnpg-i-scale-to-zero-sidecar:main
+  name: scale-to-zero-config
