@@ -1,14 +1,22 @@
 # Step 1: build image
-FROM golang:1.24 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.24 AS builder
+
+# Set up cross-compilation
+ARG TARGETPLATFORM
+ARG BUILDPLATFORM
+ARG TARGETOS
+ARG TARGETARCH
 
 # Cache the dependencies
 WORKDIR /app
 COPY go.mod go.sum /app/
 RUN go mod download
 
-# Compile the application
+# Compile the application with cross-compilation
 COPY . /app
-RUN mkdir -p /app/bin && CGO_ENABLED=0 go build -o /app/bin/cnpg-i-scale-to-zero-plugin cmd/plugin/plugin.go
+RUN mkdir -p /app/bin && \
+	CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+	go build -ldflags="-s -w" -o /app/bin/cnpg-i-scale-to-zero-plugin cmd/plugin/plugin.go
 
 # Step 2: build the image to be actually run
 FROM golang:1-alpine
