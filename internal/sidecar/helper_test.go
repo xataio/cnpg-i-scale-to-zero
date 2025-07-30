@@ -42,7 +42,11 @@ func (m *mockQuerier) QueryRow(ctx context.Context, query string, args ...any) p
 	if m.queryFunc != nil {
 		row, err := m.queryFunc(ctx, query, args...)
 		if err != nil {
-			return nil // Handle error appropriately in real code
+			return &mockRow{
+				scanFn: func(dest ...any) error {
+					return err
+				},
+			}
 		}
 		return row
 	}

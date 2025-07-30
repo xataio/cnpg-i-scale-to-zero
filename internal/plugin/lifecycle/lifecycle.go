@@ -64,7 +64,7 @@ func (impl Implementation) LifecycleHook(
 	return &lifecycle.OperatorLifecycleResponse{}, nil
 }
 
-// LifecycleHook is called when creating Kubernetes services
+// reconcileMetadata reconciles metadata for pods, specifically handling logic related to the current primary pod in a cluster
 func (impl Implementation) reconcileMetadata(
 	ctx context.Context,
 	request *lifecycle.OperatorLifecycleRequest,
