@@ -34,12 +34,18 @@ The plugin consists of two container images:
 
 We publish different image tags for different use cases:
 
-#### Development Tags
+#### Local Docker library
+
+- `dev`: local docker images built using `make docker-build-dev`
+
+#### GHCR
+
+##### Development Tags
 
 - `main`: Latest development build from the main branch
 - `main-<sha>`: Specific commit builds from main branch
 
-#### Release Tags
+##### Release Tags
 
 - `latest`: Latest stable release
 - `v1.0.0`, `v1.1.0`, etc.: Specific version releases
@@ -58,6 +64,7 @@ metadata:
     xata.io/scale-to-zero-inactivity-minutes: "10"
 spec:
   instances: 3
+  enableSuperuserAccess: true
   plugins:
     - name: cnpg-i-scale-to-zero.xata.io
   storage:
@@ -104,14 +111,14 @@ For local development and building from source:
 make build
 
 # Build Docker images
-make docker-build
+make docker-build-dev
 
 # Run tests and linting
 make test
 make lint
 
 # Local development with kind
-make kind-deploy
+make kind-deploy-dev
 ```
 
 This plugin uses the [pluginhelper](https://github.com/cloudnative-pg/cnpg-i-machinery/tree/main/pkg/pluginhelper) from [`cnpg-i-machinery`](https://github.com/cloudnative-pg/cnpg-i-machinery) to simplify the plugin's implementation.
