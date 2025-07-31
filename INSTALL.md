@@ -27,8 +27,6 @@ kubectl wait --for=condition=available --timeout=300s deployment/scale-to-zero -
 git clone https://github.com/xataio/cnpg-i-scale-to-zero.git
 cd cnpg-i-scale-to-zero
 
-# Build and deploy
-make docker-build
 make deploy
 ```
 
@@ -47,7 +45,7 @@ kubectl apply -f \
   https://github.com/cert-manager/cert-manager/releases/download/v1.16.1/cert-manager.yaml
 
 # Build and deploy the plugin
-make kind-deploy
+make kind-deploy-dev
 ```
 
 ## Usage
@@ -63,6 +61,7 @@ metadata:
     xata.io/inactivity-minutes: "10" # Hibernate after 10 minutes of inactivity
 spec:
   instances: 3
+  enableSuperuserAccess: true
   plugins:
     - name: cnpg-i-scale-to-zero.xata.io
   storage:

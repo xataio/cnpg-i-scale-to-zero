@@ -49,7 +49,7 @@ subjects:
 ---
 apiVersion: v1
 data:
-  SIDECAR_IMAGE: Z2hjci5pby94YXRhaW8vY25wZy1pLXNjYWxlLXRvLXplcm8tc2lkZWNhcjptYWlu
+  SIDECAR_IMAGE: Y25wZy1zY2FsZS10by16ZXJvLXNpZGVjYXI6ZGV2
 kind: Secret
 metadata:
   name: scale-to-zero-config-tcb898m758
@@ -105,7 +105,7 @@ spec:
         envFrom:
         - secretRef:
             name: scale-to-zero-config-tcb898m758
-        image: ghcr.io/xataio/cnpg-i-scale-to-zero:main
+        image: cnpg-i-scale-to-zero-plugin:dev
         livenessProbe:
           failureThreshold: 3
           initialDelaySeconds: 10

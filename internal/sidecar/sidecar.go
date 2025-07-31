@@ -21,57 +21,45 @@ import (
 // Start starts the sidecar informers and CNPG-i server
 func Start(ctx context.Context) error {
 	scheme := generateScheme(ctx)
-
 	setupLog := log.FromContext(ctx)
-	setupLog.Info("Starting scale to zero plugin sidecar")
 
 	podName := viper.GetString("pod-name")
 	clusterName := viper.GetString("cluster-name")
 	namespace := viper.GetString("namespace")
 
-	controllerOptions := ctrl.Options{
+	setupLog.Info("Starting scale to zero plugin sidecar", "podName", podName, "clusterName", clusterName, "namespace", namespace)
+
+	clientOptions := client.Options{
 		Scheme: scheme,
-		Client: client.Options{
-			Cache: &client.CacheOptions{
-				DisableFor: []client.Object{
-					&corev1.Secret{},
-					&cnpgv1.Cluster{},
-				},
+		Cache: &client.CacheOptions{
+			DisableFor: []client.Object{
+				&corev1.Secret{},
+				&cnpgv1.Cluster{},
 			},
 		},
 	}
 
-	setupLog.Info("Creating controller manager", "namespace", namespace, "clusterName", clusterName, "podName", podName)
-
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), controllerOptions)
+	c, err := client.New(ctrl.GetConfigOrDie(), clientOptions)
 	if err != nil {
-		setupLog.Error(err, "unable to start manager")
+		setupLog.Error(err, "unable to create client")
 		return err
 	}
 
-	client := mgr.GetClient()
-
-	runnable, err := newScaleToZero(ctx, config{
+	scaleToZeroSidecar, err := newScaleToZero(ctx, config{
 		podName: podName,
 		clusterKey: types.NamespacedName{
 			Namespace: namespace,
 			Name:      clusterName,
 		},
-	}, client)
+	}, c)
 	if err != nil {
 		return fmt.Errorf("failed to create scale to zero sidecar: %w", err)
 	}
 
-	if err := mgr.Add(runnable); err != nil {
-		setupLog.Error(err, "unable to add scale to zero to manager")
-		return err
-	}
+	err = scaleToZeroSidecar.Start(ctx)
+	defer scaleToZeroSidecar.Stop(ctx)
 
-	if err := mgr.Start(ctx); err != nil {
-		return err
-	}
-
-	return nil
+	return err
 }
 
 // generateScheme creates a runtime.Scheme object with all the

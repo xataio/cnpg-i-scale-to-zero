@@ -6,7 +6,8 @@ metadata:
     xata.io/scale-to-zero-enabled: "true"
     xata.io/scale-to-zero-inactivity-minutes: "2"
 spec:
-  instances: 2
+  instances: 1
+  enableSuperuserAccess: true
 
   plugins:
   - name: cnpg-i-scale-to-zero.xata.io
