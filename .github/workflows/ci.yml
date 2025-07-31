@@ -151,12 +151,6 @@ jobs:
               ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${{ env.IMAGE_TAG }}-linux-arm64
           fi
 
-      - name: Clean up temporary platform images
-        run: |
-          # Delete temporary platform-specific tags since we now have multi-platform manifests
-          docker buildx imagetools delete ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${{ env.IMAGE_TAG }}-linux-amd64 || true
-          docker buildx imagetools delete ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${{ env.IMAGE_TAG }}-linux-arm64 || true
-
   manifest:
     runs-on: ubuntu-latest
     needs: [build-docker-manifests]
