@@ -100,7 +100,7 @@ func (r *cnpgClusterClient) getClusterCredentials(ctx context.Context) (*postgre
 	username := string(secret.Data["username"])
 	password := string(secret.Data["password"])
 	database := string(secret.Data["dbname"])
-	if database == "*" {
+	if database == "*" || database == "" {
 		database = "postgres" // Default database if not specified
 	}
 

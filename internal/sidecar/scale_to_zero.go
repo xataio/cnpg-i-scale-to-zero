@@ -171,7 +171,7 @@ func (s *scaleToZero) isClusterActive(ctx context.Context, inactivityMinutes int
 
 // openConnections queries the PostgreSQL database to count the number of open connections.
 func (s *scaleToZero) openConnections(ctx context.Context) (int, error) {
-	const query = `SELECT COUNT(*) FROM pg_stat_activity WHERE state IN ('active', 'idle', 'idle in transaction') AND pg_backend_pid() != pg_stat_activity.pid`
+	const query = `SELECT COUNT(*) FROM pg_stat_activity WHERE state IN ('active', 'idle', 'idle in transaction') AND pg_backend_pid() != pg_stat_activity.pid AND usename != 'streaming_replica';`
 	var count int
 	if err := s.pgQuerier.QueryRow(ctx, query).Scan(&count); err != nil {
 		return 0, fmt.Errorf("failed to query open connections: %w", err)
