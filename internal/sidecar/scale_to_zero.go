@@ -75,8 +75,6 @@ func newScaleToZero(ctx context.Context, cfg config, client client.Client) (*sca
 // Start starts the scale to zero sidecar
 // It periodically checks if the cluster is active and hibernates it if not.
 func (s *scaleToZero) Start(ctx context.Context) error {
-	defer s.cleanup(ctx)
-
 	contextLogger := log.FromContext(ctx)
 
 	ticker := time.NewTicker(s.checkInterval)
@@ -115,7 +113,7 @@ func (s *scaleToZero) Start(ctx context.Context) error {
 	}
 }
 
-func (s *scaleToZero) cleanup(ctx context.Context) {
+func (s *scaleToZero) Stop(ctx context.Context) {
 	if s.pgQuerier != nil {
 		if err := s.pgQuerier.Close(ctx); err != nil {
 			log.FromContext(ctx).Error(err, "failed to close PostgreSQL querier")
