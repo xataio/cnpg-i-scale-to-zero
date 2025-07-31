@@ -108,10 +108,10 @@ spec:
         image: ghcr.io/xataio/cnpg-i-scale-to-zero:main
         livenessProbe:
           failureThreshold: 3
-          grpc:
-            port: 9090
           initialDelaySeconds: 10
           periodSeconds: 30
+          tcpSocket:
+            port: 9090
           timeoutSeconds: 5
         name: cnpg-i-scale-to-zero
         ports:
@@ -120,10 +120,10 @@ spec:
           protocol: TCP
         readinessProbe:
           failureThreshold: 3
-          grpc:
-            port: 9090
           initialDelaySeconds: 5
           periodSeconds: 10
+          tcpSocket:
+            port: 9090
           timeoutSeconds: 5
         resources: {}
         volumeMounts:
