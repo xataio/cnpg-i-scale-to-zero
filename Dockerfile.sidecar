@@ -20,5 +20,6 @@ RUN mkdir -p /app/bin && \
 
 # Step 2: build the image to be actually run
 FROM scratch
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /app/bin/cnpg-scale-to-zero-sidecar /cnpg-scale-to-zero-sidecar
 ENTRYPOINT ["/cnpg-scale-to-zero-sidecar"]
