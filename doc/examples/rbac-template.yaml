@@ -1,9 +1,18 @@
 # RBAC Template for Scale-to-Zero Clusters
 #
-# Copy and customize this for each cluster that uses scale-to-zero functionality.
-# Replace:
-# - CLUSTER_NAME: with your cluster name
-# - NAMESPACE: with your cluster's namespace
+# This template creates the necessary RBAC permissions for each cluster that uses
+# the scale-to-zero plugin. The sidecar injected into the cluster pod needs permission
+# to update cluster resources for hibernation.
+#
+# Usage:
+# 1. Copy this file: cp rbac-template.yaml my-cluster-rbac.yaml
+# 2. Replace placeholders:
+#    - CLUSTER_NAME: with your cluster name (e.g., "my-cluster")
+#    - NAMESPACE: with your cluster's namespace (e.g., "default")
+# 3. Apply: kubectl apply -f my-cluster-rbac.yaml
+#
+# Alternatively, use sed for quick replacement:
+# sed 's/CLUSTER_NAME/my-cluster/g; s/NAMESPACE/default/g' rbac-template.yaml | kubectl apply -f -
 #
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -12,8 +21,8 @@ metadata:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: cnpg-scale-to-zero-sidecar-role
+  name: cnpg-scale-to-zero-sidecar-role  # This ClusterRole is created by the plugin installation
 subjects:
 - kind: ServiceAccount
-  name: CLUSTER_NAME
+  name: CLUSTER_NAME  # CloudNativePG creates a service account with the same name as the cluster
   namespace: NAMESPACE

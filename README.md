@@ -71,6 +71,25 @@ spec:
     size: 1Gi
 ```
 
+### RBAC Configuration
+
+**Important**: Each cluster that uses scale-to-zero functionality requires specific RBAC permissions for the sidecar to update cluster resources.
+
+Create the required RBAC using the template:
+
+```bash
+# Copy the RBAC template
+curl -O https://raw.githubusercontent.com/xataio/cnpg-i-scale-to-zero/main/doc/examples/rbac-template.yaml
+
+# Edit the template to replace CLUSTER_NAME and NAMESPACE
+sed -i 's/CLUSTER_NAME/my-cluster/g; s/NAMESPACE/default/g' rbac-template.yaml
+
+# Apply the RBAC configuration
+kubectl apply -f rbac-template.yaml
+```
+
+Or see the [RBAC template](doc/examples/rbac-template.yaml) for manual customization.
+
 ### Configuration
 
 The plugin behavior is configured through cluster annotations:
