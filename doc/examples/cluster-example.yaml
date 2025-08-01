@@ -1,3 +1,18 @@
+---
+# RBAC for the cluster's sidecar to update cluster resources
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cluster-example-scale-to-zero-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cnpg-scale-to-zero-sidecar-role
+subjects:
+- kind: ServiceAccount
+  name: cluster-example
+  namespace: default
+---
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
@@ -6,7 +21,7 @@ metadata:
     xata.io/scale-to-zero-enabled: "true"
     xata.io/scale-to-zero-inactivity-minutes: "2"
 spec:
-  instances: 1
+  instances: 2
   enableSuperuserAccess: true
 
   plugins:

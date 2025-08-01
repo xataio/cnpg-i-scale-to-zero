@@ -1,0 +1,19 @@
+# RBAC Template for Scale-to-Zero Clusters
+#
+# Copy and customize this for each cluster that uses scale-to-zero functionality.
+# Replace:
+# - CLUSTER_NAME: with your cluster name
+# - NAMESPACE: with your cluster's namespace
+#
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: CLUSTER_NAME-scale-to-zero-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cnpg-scale-to-zero-sidecar-role
+subjects:
+- kind: ServiceAccount
+  name: CLUSTER_NAME
+  namespace: NAMESPACE

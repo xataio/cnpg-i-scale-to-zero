@@ -87,17 +87,17 @@ clean: ## Clean build artifacts
 	@rm -f coverage
 
 .PHONY: kind-load-sidecar
-kind-load-sidecar: docker-build-sidecar ## Build and load Docker sidecar images into kind cluster
+kind-load-sidecar: docker-build-sidecar-dev ## Build and load Docker sidecar images into kind cluster
 	@echo "Loading sidecar image into kind cluster..."
 	@kind load docker-image cnpg-scale-to-zero-sidecar:dev || echo "Failed to load sidecar image (kind cluster may not exist)"
 
 .PHONY: kind-load-plugin
-kind-load-plugin: docker-build-plugin ## Build and load Docker plugin images into kind cluster
+kind-load-plugin: docker-build-plugin-dev ## Build and load Docker plugin images into kind cluster
 	@echo "Loading plugin image into kind cluster..."
 	@kind load docker-image cnpg-i-scale-to-zero-plugin:dev || echo "Failed to load plugin image (kind cluster may not exist)"
 
 .PHONY: kind-load
-kind-load: docker-build ## Build and load Docker images into kind cluster
+kind-load: docker-build-dev ## Build and load Docker images into kind cluster
 	@echo "Loading images into kind cluster..."
 	@kind load docker-image cnpg-i-scale-to-zero-plugin:dev || echo "Failed to load plugin image (kind cluster may not exist)"
 	@kind load docker-image cnpg-scale-to-zero-sidecar:dev || echo "Failed to load sidecar image (kind cluster may not exist)"

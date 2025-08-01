@@ -19,7 +19,7 @@ RUN mkdir -p /app/bin && \
 	go build -ldflags="-s -w" -o /app/bin/cnpg-i-scale-to-zero-plugin cmd/plugin/plugin.go
 
 # Step 2: build the image to be actually run
-FROM golang:1-alpine
-USER 10001:10001
-COPY --from=builder /app/bin/cnpg-i-scale-to-zero-plugin /app/bin/cnpg-i-scale-to-zero-plugin
-ENTRYPOINT ["/app/bin/cnpg-i-scale-to-zero-plugin"]
+FROM scratch
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=builder /app/bin/cnpg-i-scale-to-zero-plugin /cnpg-i-scale-to-zero-plugin
+ENTRYPOINT ["/cnpg-i-scale-to-zero-plugin"]
