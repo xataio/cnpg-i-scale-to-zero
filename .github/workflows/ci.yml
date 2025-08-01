@@ -12,7 +12,7 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME_PLUGIN: ${{ github.repository }}
   IMAGE_NAME_SIDECAR: ${{ github.repository }}-sidecar
-  IMAGE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || 'main' }}
+  IS_MAIN_BRANCH: ${{ github.ref == 'refs/heads/main' }}
 
 jobs:
   test:
@@ -87,12 +87,20 @@ jobs:
       - name: Set image variables
         id: image
         run: |
+          # Set image-specific variables
           if [ "${{ matrix.image }}" = "plugin" ]; then
             echo "dockerfile=./Dockerfile.plugin" >> $GITHUB_OUTPUT
             echo "name=${{ env.IMAGE_NAME_PLUGIN }}" >> $GITHUB_OUTPUT
           else
             echo "dockerfile=./Dockerfile.sidecar" >> $GITHUB_OUTPUT
             echo "name=${{ env.IMAGE_NAME_SIDECAR }}" >> $GITHUB_OUTPUT
+          fi
+
+          # Set image tag
+          if [ "${{ github.event_name }}" = "release" ]; then
+            echo "tag=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=main-${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
           fi
 
       - name: Build and push Docker image
@@ -102,7 +110,7 @@ jobs:
           file: ${{ steps.image.outputs.dockerfile }}
           platforms: ${{ matrix.platform }}
           push: true
-          tags: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${{ env.IMAGE_TAG }}-${{ steps.platform.outputs.name }}
+          tags: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${{ steps.image.outputs.tag }}-${{ steps.platform.outputs.name }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -132,23 +140,41 @@ jobs:
       - name: Set image variables
         id: image
         run: |
+          # Set image name
           if [ "${{ matrix.image }}" = "plugin" ]; then
             echo "name=${{ env.IMAGE_NAME_PLUGIN }}" >> $GITHUB_OUTPUT
           else
             echo "name=${{ env.IMAGE_NAME_SIDECAR }}" >> $GITHUB_OUTPUT
           fi
 
+          # Set image tag
+          if [ "${{ github.event_name }}" = "release" ]; then
+            echo "tag=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=main-${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+          fi
+
       - name: Create and push manifest
         run: |
-          docker buildx imagetools create -t ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${{ env.IMAGE_TAG }} \
-            ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${{ env.IMAGE_TAG }}-linux-amd64 \
-            ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${{ env.IMAGE_TAG }}-linux-arm64
+          IMAGE_TAG="${{ steps.image.outputs.tag }}"
 
-          # Also create latest tag for releases
+          # Create primary manifest with SHA-based tag
+          docker buildx imagetools create -t ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${IMAGE_TAG} \
+            ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${IMAGE_TAG}-linux-amd64 \
+            ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${IMAGE_TAG}-linux-arm64
+
+          # Create moving 'main' tag for main branch builds
+          if [ "${{ env.IS_MAIN_BRANCH }}" = "true" ] && [ "${{ github.event_name }}" != "release" ]; then
+            docker buildx imagetools create -t ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:main \
+              ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${IMAGE_TAG}-linux-amd64 \
+              ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${IMAGE_TAG}-linux-arm64
+          fi
+
+          # Create latest tag for releases
           if [ "${{ github.event_name }}" = "release" ]; then
             docker buildx imagetools create -t ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:latest \
-              ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${{ env.IMAGE_TAG }}-linux-amd64 \
-              ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${{ env.IMAGE_TAG }}-linux-arm64
+              ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${IMAGE_TAG}-linux-amd64 \
+              ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${IMAGE_TAG}-linux-arm64
           fi
 
   manifest:
@@ -167,11 +193,18 @@ jobs:
 
       - name: Update kustomization with image tag
         run: |
+          # Set image tag
+          if [ "${{ github.event_name }}" = "release" ]; then
+            IMAGE_TAG="${{ github.event.release.tag_name }}"
+          else
+            IMAGE_TAG="main-${GITHUB_SHA::7}"
+          fi
+
           # Update the plugin image tag in kustomization.yaml
-          sed -i "s/newTag: main/newTag: ${{ env.IMAGE_TAG }}/g" kubernetes/kustomization.yaml
+          sed -i "s/newTag: main/newTag: ${IMAGE_TAG}/g" kubernetes/kustomization.yaml
 
           # Update the secret generator value to use the correct sidecar tag
-          sed -i "s|ghcr.io/xataio/cnpg-i-scale-to-zero-sidecar:main|ghcr.io/xataio/cnpg-i-scale-to-zero-sidecar:${{ env.IMAGE_TAG }}|g" kubernetes/kustomization.yaml
+          sed -i "s|ghcr.io/xataio/cnpg-i-scale-to-zero-sidecar:main|ghcr.io/xataio/cnpg-i-scale-to-zero-sidecar:${IMAGE_TAG}|g" kubernetes/kustomization.yaml
 
       - name: Generate manifest
         run: make manifest
