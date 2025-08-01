@@ -50,10 +50,12 @@ manifest-dev: manifest ## Generate development Kubernetes manifest with local im
 	@cp manifest.yaml manifest-dev.yaml
 	@sed -i.tmp 's|image: ghcr.io/xataio/cnpg-i-scale-to-zero:main|image: cnpg-i-scale-to-zero-plugin:dev|g' manifest-dev.yaml
 	@sed -i.tmp 's|Z2hjci5pby94YXRhaW8vY25wZy1pLXNjYWxlLXRvLXplcm8tc2lkZWNhcjptYWlu|Y25wZy1zY2FsZS10by16ZXJvLXNpZGVjYXI6ZGV2|g' manifest-dev.yaml
+	@sed -i.tmp 's|value: info|value: debug|g' manifest-dev.yaml
 	@rm -f manifest-dev.yaml.tmp
 	@echo "Development manifest generated at manifest-dev.yaml with local images:"
 	@echo "  - Plugin image: cnpg-i-scale-to-zero-plugin:dev"
 	@echo "  - Sidecar image: cnpg-scale-to-zero-sidecar:dev"
+	@echo "  - Log level: debug"
 
 .PHONY: deploy
 deploy: manifest ## Deploy the manifest to the current Kubernetes cluster

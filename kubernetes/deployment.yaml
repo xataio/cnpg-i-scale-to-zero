@@ -34,6 +34,9 @@ spec:
         - --server-key=/server/tls.key
         - --client-cert=/client/tls.crt
         - --server-address=:9090
+        env:
+        - name: LOG_LEVEL
+          value: "info"
         envFrom:
         # use a secret instead of an env variable to configure the sidecar image
         # so that the image mapping works out of the box
