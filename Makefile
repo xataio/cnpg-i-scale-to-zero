@@ -1,5 +1,8 @@
 .DEFAULT_GOAL := help
 
+# Version detection
+VERSION ?= $(shell git describe --tags --dirty 2>/dev/null || echo "dev")
+
 .PHONY: help
 help: ## Show this help message
 	@echo "Available targets:"
@@ -17,18 +20,19 @@ test: ## Run tests with coverage
 
 .PHONY: build
 build: ## Build plugin and sidecar binaries
-	@CGO_ENABLED=0 go build -o /bin/cnpg-i-scale-to-zero-plugin cmd/plugin/plugin.go
-	@CGO_ENABLED=0 go build -o /bin/cnpg-scale-to-zero-sidecar cmd/sidecar/sidecar.go
+	@echo "Building binaries with version: $(VERSION)"
+	@CGO_ENABLED=0 go build -ldflags "-X github.com/xataio/cnpg-i-scale-to-zero/pkg/metadata.Version=$(VERSION)" -o /bin/cnpg-i-scale-to-zero-plugin cmd/plugin/plugin.go
+	@CGO_ENABLED=0 go build -ldflags "-X github.com/xataio/cnpg-i-scale-to-zero/pkg/metadata.Version=$(VERSION)" -o /bin/cnpg-scale-to-zero-sidecar cmd/sidecar/sidecar.go
 
 .PHONY: docker-build-plugin-dev
 docker-build-plugin-dev: ## Build Docker image for the plugin
-	@echo "Building plugin Docker image..."
-	@docker build -f Dockerfile.plugin -t cnpg-i-scale-to-zero-plugin:dev .
+	@echo "Building plugin Docker image with version: $(VERSION)"
+	@docker build -f Dockerfile.plugin --build-arg VERSION=$(VERSION) -t cnpg-i-scale-to-zero-plugin:dev .
 
 .PHONY: docker-build-sidecar-dev
 docker-build-sidecar-dev: ## Build Docker image for the sidecar
-	@echo "Building sidecar Docker image..."
-	@docker build -f Dockerfile.sidecar -t cnpg-scale-to-zero-sidecar:dev .
+	@echo "Building sidecar Docker image with version: $(VERSION)"
+	@docker build -f Dockerfile.sidecar --build-arg VERSION=$(VERSION) -t cnpg-scale-to-zero-sidecar:dev .
 
 .PHONY: docker-build-dev
 docker-build-dev: docker-build-plugin-dev docker-build-sidecar-dev ## Build both Docker development images
