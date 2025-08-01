@@ -71,7 +71,18 @@ spec:
     size: 1Gi
 ```
 
-### RBAC Configuration
+### Configuration
+
+The plugin behavior is configured through cluster annotations:
+
+- `xata.io/scale-to-zero-enabled`: Set to `"true"` to enable scale-to-zero functionality
+- `xata.io/scale-to-zero-inactivity-minutes`: Sets the inactivity threshold in minutes before hibernation (default: 30 minutes)
+
+The plugin automatically manages the `cnpg.io/hibernation` annotation to trigger cluster hibernation.
+
+See the [cluster example](doc/examples/cluster-example.yaml) for a complete configuration.
+
+#### RBAC
 
 **Important**: Each cluster that uses scale-to-zero functionality requires specific RBAC permissions for the sidecar to update cluster resources.
 
@@ -90,16 +101,8 @@ kubectl apply -f rbac-template.yaml
 
 Or see the [RBAC template](doc/examples/rbac-template.yaml) for manual customization.
 
-### Configuration
 
-The plugin behavior is configured through cluster annotations:
 
-- `xata.io/scale-to-zero-enabled`: Set to `"true"` to enable scale-to-zero functionality
-- `xata.io/scale-to-zero-inactivity-minutes`: Sets the inactivity threshold in minutes before hibernation (default: 30 minutes)
-
-The plugin automatically manages the `cnpg.io/hibernation` annotation to trigger cluster hibernation.
-
-See the [cluster example](doc/examples/cluster-example.yaml) for a complete configuration.
 
 ## Monitoring and Observability
 
