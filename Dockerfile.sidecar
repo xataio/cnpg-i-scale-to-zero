@@ -6,6 +6,7 @@ ARG TARGETPLATFORM
 ARG BUILDPLATFORM
 ARG TARGETOS
 ARG TARGETARCH
+ARG VERSION=dev
 
 # Cache the dependencies
 WORKDIR /app
@@ -16,7 +17,7 @@ RUN go mod download
 COPY . /app
 RUN mkdir -p /app/bin && \
 	CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-	go build -ldflags="-s -w" -o /app/bin/cnpg-scale-to-zero-sidecar cmd/sidecar/sidecar.go
+	go build -ldflags="-s -w -X github.com/xataio/cnpg-i-scale-to-zero/pkg/metadata.Version=${VERSION}" -o /app/bin/cnpg-scale-to-zero-sidecar cmd/sidecar/sidecar.go
 
 # Step 2: build the image to be actually run
 FROM scratch

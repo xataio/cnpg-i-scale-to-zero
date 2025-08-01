@@ -1,5 +1,6 @@
 ---
 # RBAC for the cluster's sidecar to update cluster resources
+# For new clusters, copy and customize the rbac-template.yaml instead
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:

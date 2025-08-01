@@ -1,5 +1,8 @@
 .DEFAULT_GOAL := help
 
+# Version detection
+VERSION ?= $(shell git describe --tags --dirty 2>/dev/null || echo "dev")
+
 .PHONY: help
 help: ## Show this help message
 	@echo "Available targets:"
@@ -17,18 +20,19 @@ test: ## Run tests with coverage
 
 .PHONY: build
 build: ## Build plugin and sidecar binaries
-	@CGO_ENABLED=0 go build -o /bin/cnpg-i-scale-to-zero-plugin cmd/plugin/plugin.go
-	@CGO_ENABLED=0 go build -o /bin/cnpg-scale-to-zero-sidecar cmd/sidecar/sidecar.go
+	@echo "Building binaries with version: $(VERSION)"
+	@CGO_ENABLED=0 go build -ldflags "-X github.com/xataio/cnpg-i-scale-to-zero/pkg/metadata.Version=$(VERSION)" -o /bin/cnpg-i-scale-to-zero-plugin cmd/plugin/plugin.go
+	@CGO_ENABLED=0 go build -ldflags "-X github.com/xataio/cnpg-i-scale-to-zero/pkg/metadata.Version=$(VERSION)" -o /bin/cnpg-scale-to-zero-sidecar cmd/sidecar/sidecar.go
 
 .PHONY: docker-build-plugin-dev
 docker-build-plugin-dev: ## Build Docker image for the plugin
-	@echo "Building plugin Docker image..."
-	@docker build -f Dockerfile.plugin -t cnpg-i-scale-to-zero-plugin:dev .
+	@echo "Building plugin Docker image with version: $(VERSION)"
+	@docker build -f Dockerfile.plugin --build-arg VERSION=$(VERSION) -t cnpg-i-scale-to-zero-plugin:dev .
 
 .PHONY: docker-build-sidecar-dev
 docker-build-sidecar-dev: ## Build Docker image for the sidecar
-	@echo "Building sidecar Docker image..."
-	@docker build -f Dockerfile.sidecar -t cnpg-scale-to-zero-sidecar:dev .
+	@echo "Building sidecar Docker image with version: $(VERSION)"
+	@docker build -f Dockerfile.sidecar --build-arg VERSION=$(VERSION) -t cnpg-scale-to-zero-sidecar:dev .
 
 .PHONY: docker-build-dev
 docker-build-dev: docker-build-plugin-dev docker-build-sidecar-dev ## Build both Docker development images
@@ -50,10 +54,12 @@ manifest-dev: manifest ## Generate development Kubernetes manifest with local im
 	@cp manifest.yaml manifest-dev.yaml
 	@sed -i.tmp 's|image: ghcr.io/xataio/cnpg-i-scale-to-zero:main|image: cnpg-i-scale-to-zero-plugin:dev|g' manifest-dev.yaml
 	@sed -i.tmp 's|Z2hjci5pby94YXRhaW8vY25wZy1pLXNjYWxlLXRvLXplcm8tc2lkZWNhcjptYWlu|Y25wZy1zY2FsZS10by16ZXJvLXNpZGVjYXI6ZGV2|g' manifest-dev.yaml
+	@sed -i.tmp 's|value: info|value: debug|g' manifest-dev.yaml
 	@rm -f manifest-dev.yaml.tmp
 	@echo "Development manifest generated at manifest-dev.yaml with local images:"
 	@echo "  - Plugin image: cnpg-i-scale-to-zero-plugin:dev"
 	@echo "  - Sidecar image: cnpg-scale-to-zero-sidecar:dev"
+	@echo "  - Log level: debug"
 
 .PHONY: deploy
 deploy: manifest ## Deploy the manifest to the current Kubernetes cluster
