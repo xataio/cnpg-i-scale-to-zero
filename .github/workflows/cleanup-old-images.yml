@@ -1,0 +1,49 @@
+name: Cleanup Old Container Images
+
+on:
+  schedule:
+    # Run weekly on Mondays at 12 PM UTC (noon)
+    - cron: "0 12 * * 1"
+  workflow_dispatch: # Allow manual trigger
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Preview cleanup (dry run)
+        uses: dataaxiom/ghcr-cleanup-action@v1
+        with: &cleanup-config
+          token: ${{ secrets.GITHUB_TOKEN }}
+          packages: "cnpg-i-scale-to-zero,cnpg-i-scale-to-zero-sidecar"
+          # Keep version tags (v1.2.3), latest tag, and most recent main tag
+          exclude-tags: "v*,latest,main"
+          # Delete old main- development images and untagged images
+          delete-tags: "main-*"
+          delete-untagged: true
+          # Enhanced logging
+          log-level: "info"
+          # Dry run mode - overridden in cleanup job
+          dry-run: true
+
+  cleanup:
+    needs: preview
+    runs-on: ubuntu-latest
+    environment:
+      name: image-cleanup-approval
+      url: https://github.com/${{ github.repository }}/packages
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Cleanup old container images
+        uses: dataaxiom/ghcr-cleanup-action@v1
+        with:
+          <<: *cleanup-config
+          # Override: actually perform the cleanup
+          dry-run: false
