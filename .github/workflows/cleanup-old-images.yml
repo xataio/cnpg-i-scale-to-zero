@@ -1,0 +1,201 @@
+name: Cleanup Old Container Images
+
+on:
+  schedule:
+    # Run weekly on Mondays at 12 PM UTC (noon)
+    - cron: "0 12 * * 1"
+  workflow_dispatch: # Allow manual trigger
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      plugin-deletions: ${{ steps.analyze.outputs.plugin-deletions }}
+      plugin-has-deletions: ${{ steps.analyze.outputs.plugin-has-deletions }}
+      sidecar-deletions: ${{ steps.analyze.outputs.sidecar-deletions }}
+      sidecar-has-deletions: ${{ steps.analyze.outputs.sidecar-has-deletions }}
+      any-deletions: ${{ steps.analyze.outputs.any-deletions }}
+    steps:
+      - name: Analyze cleanup for both packages
+        id: analyze
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const packages = [
+              { name: 'cnpg-i-scale-to-zero', outputPrefix: 'plugin' },
+              { name: 'cnpg-i-scale-to-zero-sidecar', outputPrefix: 'sidecar' }
+            ];
+            const owner = context.repo.owner;
+
+            // Reusable analysis function
+            async function analyzePackage(packageName) {
+              console.log(`🔍 PREVIEW: Analyzing cleanup for ${packageName}`);
+
+              try {
+                const { data: versions } = await github.rest.packages.getAllPackageVersionsForPackageOwnedByOrg({
+                  package_type: 'container',
+                  package_name: packageName,
+                  org: owner,
+                  per_page: 100
+                });
+
+                const sortedVersions = versions.sort((a, b) =>
+                  new Date(b.created_at) - new Date(a.created_at)
+                );
+
+                const keepVersionIds = new Set();
+                const deleteVersionIds = [];
+                let mainTagCount = 0;
+
+                // Single analysis pass - compute both keep and delete lists
+                for (const version of sortedVersions) {
+                  const tags = version.metadata?.container?.tags || [];
+
+                  const hasVersionTag = tags.some(tag => tag.startsWith('v') && /^v\d+\.\d+(\.\d+)?/.test(tag));
+                  const hasLatestTag = tags.some(tag => tag === 'latest');
+
+                  if (hasVersionTag || hasLatestTag) {
+                    keepVersionIds.add(version.id);
+                    console.log(`✅ WILL KEEP: ${tags.join(', ')} (protected)`);
+                    continue;
+                  }
+
+                  const hasMainTag = tags.some(tag => tag === 'main');
+                  if (hasMainTag) {
+                    mainTagCount++;
+                    if (mainTagCount === 1) {
+                      keepVersionIds.add(version.id);
+                      console.log(`✅ WILL KEEP: ${tags.join(', ')} (latest main)`);
+                      continue;
+                    } else {
+                      deleteVersionIds.push(version.id);
+                      console.log(`🗑️ WILL DELETE: ${tags.join(', ')} (old main tag)`);
+                      continue;
+                    }
+                  }
+
+                  const shouldDelete = tags.some(tag =>
+                    tag.startsWith('pr-') ||
+                    tag.startsWith('main-')
+                  ) || tags.length === 0;
+
+                  if (shouldDelete) {
+                    const reason = tags.length === 0 ? 'untagged SHA256' :
+                                 tags.some(tag => tag.startsWith('pr-')) ? 'PR image' : 'development image';
+                    deleteVersionIds.push(version.id);
+                    const tagDisplay = tags.length > 0 ? tags.join(', ') : 'untagged';
+                    console.log(`🗑️ WILL DELETE: [${tagDisplay}] (${reason})`);
+                  } else {
+                    keepVersionIds.add(version.id);
+                    console.log(`✅ WILL KEEP: ${tags.join(', ')} (safe to keep)`);
+                  }
+                }
+
+                console.log(`\n📊 CLEANUP SUMMARY FOR ${packageName}:`);
+                console.log(`   • Total versions: ${versions.length}`);
+                console.log(`   • Will keep: ${keepVersionIds.size}`);
+                console.log(`   • Will delete: ${deleteVersionIds.length}`);
+
+                return {
+                  deleteVersionIds,
+                  hasDeletions: deleteVersionIds.length > 0
+                };
+
+              } catch (error) {
+                console.log(`❌ Could not analyze ${packageName}: ${error.message}`);
+                return {
+                  deleteVersionIds: [],
+                  hasDeletions: false
+                };
+              }
+            }
+
+            // Analyze both packages
+            const results = {};
+            let anyDeletions = false;
+
+            for (const pkg of packages) {
+              const result = await analyzePackage(pkg.name);
+              results[pkg.outputPrefix] = result;
+              if (result.hasDeletions) {
+                anyDeletions = true;
+              }
+
+              // Set outputs for this package
+              core.setOutput(`${pkg.outputPrefix}-deletions`, JSON.stringify(result.deleteVersionIds));
+              core.setOutput(`${pkg.outputPrefix}-has-deletions`, result.hasDeletions);
+            }
+
+            // Set overall deletion flag
+            core.setOutput('any-deletions', anyDeletions);
+            console.log(`\n🔍 Overall cleanup needed: ${anyDeletions}`);
+
+  cleanup:
+    needs: preview
+    if: needs.preview.outputs.any-deletions == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: image-cleanup-approval
+      url: https://github.com/${{ github.repository }}/packages
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - package: cnpg-i-scale-to-zero
+            deletions-output: plugin-deletions
+            has-deletions-output: plugin-has-deletions
+          - package: cnpg-i-scale-to-zero-sidecar
+            deletions-output: sidecar-deletions
+            has-deletions-output: sidecar-has-deletions
+    steps:
+      - name: Delete old container images
+        if: needs.preview.outputs[matrix.has-deletions-output] == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const packageName = '${{ matrix.package }}';
+            const owner = context.repo.owner;
+
+            // Get the delete list from the preview job outputs
+            const deleteVersionIdsJson = `${{ needs.preview.outputs[matrix.deletions-output] }}` || '[]';
+            const deleteVersionIds = JSON.parse(deleteVersionIdsJson);
+
+            if (deleteVersionIds.length === 0) {
+              console.log(`✨ No cleanup needed for ${packageName}`);
+              return;
+            }
+
+            console.log(`🧹 Executing cleanup for ${packageName}`);
+            console.log(`📋 Deleting ${deleteVersionIds.length} versions...`);
+
+            let deletedCount = 0;
+
+            for (const versionId of deleteVersionIds) {
+              try {
+                await github.rest.packages.deletePackageVersionForOrg({
+                  package_type: 'container',
+                  package_name: packageName,
+                  org: owner,
+                  package_version_id: versionId
+                });
+
+                console.log(`✅ DELETED: ${packageName} version ${versionId}`);
+                deletedCount++;
+              } catch (error) {
+                console.log(`❌ Failed to delete ${packageName} version ${versionId}: ${error.message}`);
+              }
+            }
+
+            console.log(`🎉 Cleanup completed for ${packageName}: ${deletedCount}/${deleteVersionIds.length} versions deleted`);
+
+      - name: Skip cleanup
+        if: needs.preview.outputs[matrix.has-deletions-output] != 'true'
+        run: echo "✨ No cleanup needed for ${{ matrix.package }}"
