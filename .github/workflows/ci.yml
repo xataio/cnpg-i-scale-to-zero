@@ -71,7 +71,7 @@ jobs:
       - name: Download manifest artifact
         uses: actions/download-artifact@v4
         with:
-          name: kubernetes-manifest-release
+          name: kubernetes-manifest
 
       - name: Upload manifest to release
         env:

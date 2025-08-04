@@ -55,10 +55,10 @@ jobs:
       matrix:
         include:
           - dockerfile: ./Dockerfile.plugin
-            image_name: ${{ github.repository }}
+            image_suffix: ""
             build_name: plugin
           - dockerfile: ./Dockerfile.sidecar
-            image_name: ${{ github.repository }}-sidecar
+            image_suffix: "-sidecar"
             build_name: sidecar
 
     steps:
@@ -76,6 +76,27 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Set image name
+        id: image
+        run: echo "name=${{ github.repository }}${{ matrix.image_suffix }}" >> $GITHUB_OUTPUT
+
+      - name: Generate additional tags
+        id: tags
+        run: |
+          TAGS="${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${{ inputs.image_tag }}"
+
+          # Add 'main' tag for main branch builds (non-PR)
+          if [[ "${{ inputs.should_push }}" == "true" && "${{ inputs.image_tag }}" != *"pr-"* && "${{ inputs.image_tag }}" == "main-"* ]]; then
+            TAGS="${TAGS},${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:main"
+          fi
+
+          # Add 'latest' tag for release builds (version tags)
+          if [[ "${{ inputs.should_push }}" == "true" && "${{ inputs.image_tag }}" != *"pr-"* && "${{ inputs.image_tag }}" == "v"* ]]; then
+            TAGS="${TAGS},${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:latest"
+          fi
+
+          echo "tags=$TAGS" >> $GITHUB_OUTPUT
+
       - name: Build and push multi-platform ${{ matrix.build_name }} image
         uses: docker/build-push-action@v5
         with:
@@ -83,10 +104,7 @@ jobs:
           file: ${{ matrix.dockerfile }}
           platforms: linux/amd64,linux/arm64
           push: ${{ inputs.should_push }}
-          tags: |
-            ${{ env.REGISTRY }}/${{ matrix.image_name }}:${{ inputs.image_tag }}
-            ${{ inputs.should_push && !contains(inputs.image_tag, 'pr-') && startsWith(inputs.image_tag, 'main-') && format('{0}/{1}:main', env.REGISTRY, matrix.image_name) || '' }}
-            ${{ inputs.should_push && !contains(inputs.image_tag, 'pr-') && startsWith(inputs.image_tag, 'v') && format('{0}/{1}:latest', env.REGISTRY, matrix.image_name) || '' }}
+          tags: ${{ steps.tags.outputs.tags }}
           build-args: |
             VERSION=${{ inputs.image_tag }}
 
