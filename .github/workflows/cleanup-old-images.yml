@@ -27,11 +27,31 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
+            // Configuration
             const packages = [
               { name: 'cnpg-i-scale-to-zero', outputPrefix: 'plugin' },
               { name: 'cnpg-i-scale-to-zero-sidecar', outputPrefix: 'sidecar' }
             ];
+
+            // Tag patterns configuration
+            const tagPatterns = {
+              version: /^v\d+\.\d+(\.\d+)?$/,
+              latest: 'latest',
+              main: 'main',
+              prPrefix: 'pr-',
+              developmentPrefixes: ['pr-', 'main-']
+            };
+
             const owner = context.repo.owner;
+
+            // Get list of open PRs once for all packages
+            const { data: openPRs } = await github.rest.pulls.list({
+              owner: owner,
+              repo: context.repo.repo,
+              state: 'open'
+            });
+            const openPRNumbers = new Set(openPRs.map(pr => pr.number));
+            console.log(`📋 Found ${openPRNumbers.size} open PRs: ${Array.from(openPRNumbers).join(', ')}`);
 
             // Reusable analysis function
             async function analyzePackage(packageName) {
@@ -57,8 +77,8 @@ jobs:
                 for (const version of sortedVersions) {
                   const tags = version.metadata?.container?.tags || [];
 
-                  const hasVersionTag = tags.some(tag => /^v\d+\.\d+(\.\d+)?$/.test(tag));
-                  const hasLatestTag = tags.some(tag => tag === 'latest');
+                  const hasVersionTag = tags.some(tag => tagPatterns.version.test(tag));
+                  const hasLatestTag = tags.some(tag => tag === tagPatterns.latest);
 
                   if (hasVersionTag || hasLatestTag) {
                     keepVersionIds.add(version.id);
@@ -66,7 +86,7 @@ jobs:
                     continue;
                   }
 
-                  const hasMainTag = tags.some(tag => tag === 'main');
+                  const hasMainTag = tags.some(tag => tag === tagPatterns.main);
                   if (hasMainTag) {
                     mainTagCount++;
                     if (mainTagCount === 1) {
@@ -80,14 +100,36 @@ jobs:
                     }
                   }
 
+                  // Check PR tags first
+                  const prTags = tags.filter(tag => tag.startsWith(tagPatterns.prPrefix));
+                  let isOpenPR = false;
+
+                  if (prTags.length > 0) {
+                    for (const prTag of prTags) {
+                      const prMatch = prTag.match(/^pr-(\d+)$/);
+                      if (prMatch) {
+                        const prNumber = parseInt(prMatch[1], 10);
+                        if (openPRNumbers.has(prNumber)) {
+                          isOpenPR = true;
+                          break;
+                        }
+                      }
+                    }
+                  }
+
+                  if (isOpenPR) {
+                    keepVersionIds.add(version.id);
+                    console.log(`✅ WILL KEEP: ${tags.join(', ')} (open PR)`);
+                    continue;
+                  }
+
                   const shouldDelete = tags.some(tag =>
-                    tag.startsWith('pr-') ||
-                    tag.startsWith('main-')
+                    tagPatterns.developmentPrefixes.some(prefix => tag.startsWith(prefix))
                   ) || tags.length === 0;
 
                   if (shouldDelete) {
                     const reason = tags.length === 0 ? 'untagged SHA256' :
-                                 tags.some(tag => tag.startsWith('pr-')) ? 'PR image' : 'development image';
+                                 tags.some(tag => tag.startsWith(tagPatterns.prPrefix)) ? 'closed PR image' : 'development image';
                     deleteVersionIds.push(version.id);
                     const tagDisplay = tags.length > 0 ? tags.join(', ') : 'untagged';
                     console.log(`🗑️ WILL DELETE: [${tagDisplay}] (${reason})`);
@@ -159,19 +201,30 @@ jobs:
             const packageName = '${{ matrix.package }}';
             const owner = context.repo.owner;
 
-            // Get the delete list from the preview job outputs based on package name
-            let deleteVersionIds = [];
-            let hasDeletions = false;
+            // Package name to output prefix mapping
+            const packageMapping = {
+              'cnpg-i-scale-to-zero': 'plugin',
+              'cnpg-i-scale-to-zero-sidecar': 'sidecar'
+            };
 
-            if (packageName === 'cnpg-i-scale-to-zero') {
-              const deleteVersionIdsJson = `${{ needs.preview.outputs.plugin-deletions }}` || '[]';
-              deleteVersionIds = JSON.parse(deleteVersionIdsJson);
-              hasDeletions = '${{ needs.preview.outputs.plugin-has-deletions }}' === 'true';
-            } else if (packageName === 'cnpg-i-scale-to-zero-sidecar') {
-              const deleteVersionIdsJson = `${{ needs.preview.outputs.sidecar-deletions }}` || '[]';
-              deleteVersionIds = JSON.parse(deleteVersionIdsJson);
-              hasDeletions = '${{ needs.preview.outputs.sidecar-has-deletions }}' === 'true';
+            const outputPrefix = packageMapping[packageName];
+            if (!outputPrefix) {
+              console.log(`❌ Unknown package: ${packageName}`);
+              return;
             }
+
+            // Get all preview outputs
+            const previewOutputs = {
+              'plugin-deletions': `${{ needs.preview.outputs.plugin-deletions }}`,
+              'plugin-has-deletions': '${{ needs.preview.outputs.plugin-has-deletions }}',
+              'sidecar-deletions': `${{ needs.preview.outputs.sidecar-deletions }}`,
+              'sidecar-has-deletions': '${{ needs.preview.outputs.sidecar-has-deletions }}'
+            };
+
+            // Get the delete list using mapping
+            const deleteVersionIdsJson = previewOutputs[`${outputPrefix}-deletions`] || '[]';
+            const deleteVersionIds = JSON.parse(deleteVersionIdsJson);
+            const hasDeletions = previewOutputs[`${outputPrefix}-has-deletions`] === 'true';
 
             if (!hasDeletions || deleteVersionIds.length === 0) {
               console.log(`✨ No cleanup needed for ${packageName}`);
