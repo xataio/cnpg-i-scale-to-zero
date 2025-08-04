@@ -15,138 +15,24 @@ jobs:
     permissions:
       contents: read
       packages: read
-    outputs:
-      plugin-deletions: ${{ steps.analyze.outputs.plugin-deletions }}
-      plugin-has-deletions: ${{ steps.analyze.outputs.plugin-has-deletions }}
-      sidecar-deletions: ${{ steps.analyze.outputs.sidecar-deletions }}
-      sidecar-has-deletions: ${{ steps.analyze.outputs.sidecar-has-deletions }}
-      any-deletions: ${{ steps.analyze.outputs.any-deletions }}
     steps:
-      - name: Analyze cleanup for both packages
-        id: analyze
-        uses: actions/github-script@v7
-        with:
-          script: |
-            // Configuration
-            const packages = [
-              { name: 'cnpg-i-scale-to-zero', outputPrefix: 'plugin' },
-              { name: 'cnpg-i-scale-to-zero-sidecar', outputPrefix: 'sidecar' }
-            ];
-
-            // Tag patterns configuration
-            const tagPatterns = {
-              version: /^v\d+\.\d+(\.\d+)?$/,
-              latest: 'latest',
-              main: 'main',
-              developmentPrefixes: ['main-']
-            };
-
-            const owner = context.repo.owner;
-
-            // Reusable analysis function
-            async function analyzePackage(packageName) {
-              console.log(`🔍 PREVIEW: Analyzing cleanup for ${packageName}`);
-
-              try {
-                const { data: versions } = await github.rest.packages.getAllPackageVersionsForPackageOwnedByOrg({
-                  package_type: 'container',
-                  package_name: packageName,
-                  org: owner,
-                  per_page: 100
-                });
-
-                const sortedVersions = versions.sort((a, b) =>
-                  new Date(b.created_at) - new Date(a.created_at)
-                );
-
-                const keepVersionIds = new Set();
-                const deleteVersionIds = [];
-                let mainTagCount = 0;
-
-                // Single analysis pass - compute both keep and delete lists
-                for (const version of sortedVersions) {
-                  const tags = version.metadata?.container?.tags || [];
-
-                  const hasVersionTag = tags.some(tag => tagPatterns.version.test(tag));
-                  const hasLatestTag = tags.some(tag => tag === tagPatterns.latest);
-
-                  if (hasVersionTag || hasLatestTag) {
-                    keepVersionIds.add(version.id);
-                    console.log(`✅ WILL KEEP: ${tags.join(', ')} (protected)`);
-                    continue;
-                  }
-
-                  const hasMainTag = tags.some(tag => tag === tagPatterns.main);
-                  if (hasMainTag) {
-                    mainTagCount++;
-                    if (mainTagCount === 1) {
-                      keepVersionIds.add(version.id);
-                      console.log(`✅ WILL KEEP: ${tags.join(', ')} (latest main)`);
-                      continue;
-                    } else {
-                      deleteVersionIds.push(version.id);
-                      console.log(`🗑️ WILL DELETE: ${tags.join(', ')} (old main tag)`);
-                      continue;
-                    }
-                  }
-
-                  const shouldDelete = tags.some(tag =>
-                    tagPatterns.developmentPrefixes.some(prefix => tag.startsWith(prefix))
-                  ) || tags.length === 0;
-
-                  if (shouldDelete) {
-                    const reason = tags.length === 0 ? 'untagged SHA256' : 'development image';
-                    deleteVersionIds.push(version.id);
-                    const tagDisplay = tags.length > 0 ? tags.join(', ') : 'untagged';
-                    console.log(`🗑️ WILL DELETE: [${tagDisplay}] (${reason})`);
-                  } else {
-                    keepVersionIds.add(version.id);
-                    console.log(`✅ WILL KEEP: ${tags.join(', ')} (safe to keep)`);
-                  }
-                }
-
-                console.log(`\n📊 CLEANUP SUMMARY FOR ${packageName}:`);
-                console.log(`   • Total versions: ${versions.length}`);
-                console.log(`   • Will keep: ${keepVersionIds.size}`);
-                console.log(`   • Will delete: ${deleteVersionIds.length}`);
-
-                return {
-                  deleteVersionIds,
-                  hasDeletions: deleteVersionIds.length > 0
-                };
-
-              } catch (error) {
-                console.log(`❌ Could not analyze ${packageName}: ${error.message}`);
-                return {
-                  deleteVersionIds: [],
-                  hasDeletions: false
-                };
-              }
-            }
-
-            // Analyze both packages
-            const results = {};
-            let anyDeletions = false;
-
-            for (const pkg of packages) {
-              const result = await analyzePackage(pkg.name);
-              results[pkg.outputPrefix] = result;
-              if (result.hasDeletions) {
-                anyDeletions = true;
-              }
-
-              // Set outputs for this package
-              core.setOutput(`${pkg.outputPrefix}-deletions`, JSON.stringify(result.deleteVersionIds));
-              core.setOutput(`${pkg.outputPrefix}-has-deletions`, result.hasDeletions);
-            }
-
-            // Set overall deletion flag
-            core.setOutput('any-deletions', anyDeletions);
-            console.log(`\n🔍 Overall cleanup needed: ${anyDeletions}`);
+      - name: Preview cleanup (dry run)
+        uses: dataaxiom/ghcr-cleanup-action@v1
+        with: &cleanup-config
+          token: ${{ secrets.GITHUB_TOKEN }}
+          packages: "cnpg-i-scale-to-zero,cnpg-i-scale-to-zero-sidecar"
+          # Keep version tags (v1.2.3), latest tag, and most recent main tag
+          exclude-tags: "v*,latest,main"
+          # Delete old main- development images and untagged images
+          delete-tags: "main-*"
+          delete-untagged: true
+          # Enhanced logging
+          log-level: "info"
+          # Dry run mode - overridden in cleanup job
+          dry-run: true
 
   cleanup:
     needs: preview
-    if: needs.preview.outputs.any-deletions == 'true'
     runs-on: ubuntu-latest
     environment:
       name: image-cleanup-approval
@@ -154,90 +40,10 @@ jobs:
     permissions:
       contents: read
       packages: write
-    strategy:
-      matrix:
-        package:
-          - cnpg-i-scale-to-zero
-          - cnpg-i-scale-to-zero-sidecar
     steps:
-      - name: Delete old container images
-        uses: actions/github-script@v7
+      - name: Cleanup old container images
+        uses: dataaxiom/ghcr-cleanup-action@v1
         with:
-          script: |
-            const packageName = '${{ matrix.package }}';
-            const owner = context.repo.owner;
-
-            // Package name to output prefix mapping
-            const packageMapping = {
-              'cnpg-i-scale-to-zero': 'plugin',
-              'cnpg-i-scale-to-zero-sidecar': 'sidecar'
-            };
-
-            const outputPrefix = packageMapping[packageName];
-            if (!outputPrefix) {
-              console.log(`❌ Unknown package: ${packageName}`);
-              return;
-            }
-
-            // Get all preview outputs
-            const previewOutputs = {
-              'plugin-deletions': `${{ needs.preview.outputs.plugin-deletions }}`,
-              'plugin-has-deletions': '${{ needs.preview.outputs.plugin-has-deletions }}',
-              'sidecar-deletions': `${{ needs.preview.outputs.sidecar-deletions }}`,
-              'sidecar-has-deletions': '${{ needs.preview.outputs.sidecar-has-deletions }}'
-            };
-
-            // Get the delete list using mapping
-            const deleteVersionIdsJson = previewOutputs[`${outputPrefix}-deletions`] || '[]';
-            const deleteVersionIds = JSON.parse(deleteVersionIdsJson);
-            const hasDeletions = previewOutputs[`${outputPrefix}-has-deletions`] === 'true';
-
-            if (!hasDeletions || deleteVersionIds.length === 0) {
-              console.log(`✨ No cleanup needed for ${packageName}`);
-              return;
-            }
-
-            console.log(`🧹 Executing cleanup for ${packageName}`);
-            console.log(`📋 Deleting ${deleteVersionIds.length} versions...`);
-
-            // Batch delete for better performance
-            const batchSize = 10; // GitHub API recommendation
-            let deletedCount = 0;
-
-            for (let i = 0; i < deleteVersionIds.length; i += batchSize) {
-              const batch = deleteVersionIds.slice(i, i + batchSize);
-              console.log(`🔄 Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(deleteVersionIds.length / batchSize)} (${batch.length} versions)`);
-
-              // Process batch in parallel
-              const deletePromises = batch.map(async (versionId) => {
-                try {
-                  await github.rest.packages.deletePackageVersionForOrg({
-                    package_type: 'container',
-                    package_name: packageName,
-                    org: owner,
-                    package_version_id: versionId
-                  });
-                  console.log(`✅ DELETED: ${packageName} version ${versionId}`);
-                  return { success: true, versionId };
-                } catch (error) {
-                  console.log(`❌ Failed to delete ${packageName} version ${versionId}: ${error.message}`);
-                  return { success: false, versionId, error: error.message };
-                }
-              });
-
-              const batchResults = await Promise.allSettled(deletePromises);
-              const batchSuccessCount = batchResults.filter(result =>
-                result.status === 'fulfilled' && result.value.success
-              ).length;
-
-              deletedCount += batchSuccessCount;
-              console.log(`📊 Batch completed: ${batchSuccessCount}/${batch.length} successful deletions`);
-
-              // Add delay between batches to respect rate limits
-              if (i + batchSize < deleteVersionIds.length) {
-                console.log(`⏳ Waiting 2 seconds before next batch...`);
-                await new Promise(resolve => setTimeout(resolve, 2000));
-              }
-            }
-
-            console.log(`🎉 Cleanup completed for ${packageName}: ${deletedCount}/${deleteVersionIds.length} versions deleted`);
+          <<: *cleanup-config
+          # Override: actually perform the cleanup
+          dry-run: false
