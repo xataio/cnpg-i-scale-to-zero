@@ -1,0 +1,180 @@
+name: Reusable Docker Build
+
+# Reusable workflow for building and pushing Docker images
+# Used by both CI and PR image workflows
+
+on:
+  workflow_call:
+    inputs:
+      image_tag:
+        description: "Tag to use for the images"
+        required: true
+        type: string
+      should_push:
+        description: "Whether to push images to registry"
+        required: false
+        type: boolean
+        default: true
+      generate_manifest:
+        description: "Whether to generate Kubernetes manifest"
+        required: false
+        type: boolean
+        default: false
+      manifest_name:
+        description: "Name for the manifest artifact"
+        required: false
+        type: string
+        default: "kubernetes-manifest"
+      environment:
+        description: "Environment to use for approval (optional)"
+        required: false
+        type: string
+    outputs:
+      plugin_image:
+        description: "Full plugin image name with tag"
+        value: ghcr.io/${{ github.repository }}:${{ inputs.image_tag }}
+      sidecar_image:
+        description: "Full sidecar image name with tag"
+        value: ghcr.io/${{ github.repository }}-sidecar:${{ inputs.image_tag }}
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME_PLUGIN: ${{ github.repository }}
+  IMAGE_NAME_SIDECAR: ${{ github.repository }}-sidecar
+
+jobs:
+  build-docker-images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    environment: ${{ inputs.environment || null }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [linux/amd64, linux/arm64]
+        image: [plugin, sidecar]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        if: inputs.should_push
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract platform name
+        id: platform
+        run: echo "name=$(echo ${{ matrix.platform }} | tr '/' '-')" >> $GITHUB_OUTPUT
+
+      - name: Set image variables
+        id: image
+        run: |
+          if [ "${{ matrix.image }}" = "plugin" ]; then
+            echo "dockerfile=./Dockerfile.plugin" >> $GITHUB_OUTPUT
+            echo "name=${{ env.IMAGE_NAME_PLUGIN }}" >> $GITHUB_OUTPUT
+          else
+            echo "dockerfile=./Dockerfile.sidecar" >> $GITHUB_OUTPUT
+            echo "name=${{ env.IMAGE_NAME_SIDECAR }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ${{ steps.image.outputs.dockerfile }}
+          platforms: ${{ matrix.platform }}
+          push: ${{ inputs.should_push }}
+          tags: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${{ inputs.image_tag }}-${{ steps.platform.outputs.name }}
+          build-args: |
+            VERSION=${{ inputs.image_tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  create-manifests-and-tags:
+    runs-on: ubuntu-latest
+    needs: [build-docker-images]
+    if: inputs.should_push
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Create multi-platform manifests and tags
+        run: |
+          # Helper function to create manifest for an image
+          create_manifest() {
+            local image_name=$1
+            local tag=$2
+            docker buildx imagetools create -t ${REGISTRY}/${image_name}:${tag} \
+              ${REGISTRY}/${image_name}:${{ inputs.image_tag }}-linux-amd64 \
+              ${REGISTRY}/${image_name}:${{ inputs.image_tag }}-linux-arm64
+          }
+
+          # Create primary manifests
+          create_manifest "${{ env.IMAGE_NAME_PLUGIN }}" "${{ inputs.image_tag }}"
+          create_manifest "${{ env.IMAGE_NAME_SIDECAR }}" "${{ inputs.image_tag }}"
+
+          # Create moving tags (skip for PR builds)
+          if [[ ! "${{ inputs.image_tag }}" =~ pr- ]]; then
+            # Create 'main' tags for main branch builds
+            if [[ "${{ inputs.image_tag }}" =~ ^main- ]]; then
+              create_manifest "${{ env.IMAGE_NAME_PLUGIN }}" "main"
+              create_manifest "${{ env.IMAGE_NAME_SIDECAR }}" "main"
+            fi
+
+            # Create 'latest' tags for releases
+            if [[ "${{ inputs.image_tag }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+              create_manifest "${{ env.IMAGE_NAME_PLUGIN }}" "latest"
+              create_manifest "${{ env.IMAGE_NAME_SIDECAR }}" "latest"
+            fi
+          fi
+
+  generate-manifest:
+    runs-on: ubuntu-latest
+    if: inputs.generate_manifest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install kustomize
+        run: |
+          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          sudo mv kustomize /usr/local/bin/
+
+      - name: Update kustomization with image tag
+        run: |
+          # Update the plugin image tag in kustomization.yaml
+          sed -i "s/newTag: main/newTag: ${{ inputs.image_tag }}/g" kubernetes/kustomization.yaml
+
+          # Update the secret generator value to use the correct sidecar tag
+          sed -i "s|ghcr.io/xataio/cnpg-i-scale-to-zero-sidecar:main|ghcr.io/xataio/cnpg-i-scale-to-zero-sidecar:${{ inputs.image_tag }}|g" kubernetes/kustomization.yaml
+
+      - name: Generate manifest
+        run: make manifest
+
+      - name: Upload manifest artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.manifest_name }}
+          path: manifest.yaml
+          retention-days: 7
