@@ -234,21 +234,43 @@ jobs:
             console.log(`🧹 Executing cleanup for ${packageName}`);
             console.log(`📋 Deleting ${deleteVersionIds.length} versions...`);
 
+            // Batch delete for better performance
+            const batchSize = 10; // GitHub API recommendation
             let deletedCount = 0;
 
-            for (const versionId of deleteVersionIds) {
-              try {
-                await github.rest.packages.deletePackageVersionForOrg({
-                  package_type: 'container',
-                  package_name: packageName,
-                  org: owner,
-                  package_version_id: versionId
-                });
+            for (let i = 0; i < deleteVersionIds.length; i += batchSize) {
+              const batch = deleteVersionIds.slice(i, i + batchSize);
+              console.log(`🔄 Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(deleteVersionIds.length / batchSize)} (${batch.length} versions)`);
 
-                console.log(`✅ DELETED: ${packageName} version ${versionId}`);
-                deletedCount++;
-              } catch (error) {
-                console.log(`❌ Failed to delete ${packageName} version ${versionId}: ${error.message}`);
+              // Process batch in parallel
+              const deletePromises = batch.map(async (versionId) => {
+                try {
+                  await github.rest.packages.deletePackageVersionForOrg({
+                    package_type: 'container',
+                    package_name: packageName,
+                    org: owner,
+                    package_version_id: versionId
+                  });
+                  console.log(`✅ DELETED: ${packageName} version ${versionId}`);
+                  return { success: true, versionId };
+                } catch (error) {
+                  console.log(`❌ Failed to delete ${packageName} version ${versionId}: ${error.message}`);
+                  return { success: false, versionId, error: error.message };
+                }
+              });
+
+              const batchResults = await Promise.allSettled(deletePromises);
+              const batchSuccessCount = batchResults.filter(result =>
+                result.status === 'fulfilled' && result.value.success
+              ).length;
+
+              deletedCount += batchSuccessCount;
+              console.log(`📊 Batch completed: ${batchSuccessCount}/${batch.length} successful deletions`);
+
+              // Add delay between batches to respect rate limits
+              if (i + batchSize < deleteVersionIds.length) {
+                console.log(`⏳ Waiting 2 seconds before next batch...`);
+                await new Promise(resolve => setTimeout(resolve, 2000));
               }
             }
 
