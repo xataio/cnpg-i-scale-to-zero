@@ -18,15 +18,17 @@ import (
 // Implementation is the implementation of the lifecycle handler
 type Implementation struct {
 	lifecycle.UnimplementedOperatorLifecycleServer
-	logLevel     string
-	sidecarImage string
+	logLevel         string
+	sidecarImage     string
+	sidecarResources corev1.ResourceRequirements
 }
 
 // NewImplementation creates a new lifecycle implementation with the given config
 func NewImplementation(cfg *config.Config) *Implementation {
 	return &Implementation{
-		logLevel:     cfg.LogLevel,
-		sidecarImage: cfg.SidecarImage,
+		logLevel:         cfg.LogLevel,
+		sidecarImage:     cfg.SidecarImage,
+		sidecarResources: cfg.SidecarResources.ToResourceRequirements(),
 	}
 }
 
@@ -101,8 +103,7 @@ func (impl Implementation) reconcileMetadata(
 	logger.Info("injecting sidecar into pod", "pod", pod.Name, "primary", cluster.Status.CurrentPrimary)
 	mutatedPod := pod.DeepCopy()
 
-	logger.Info("injecting environment variables into sidecar", "namespace", pod.Namespace, "cluster name", cluster.Name, "pod name", pod.Name)
-	err = object.InjectPluginSidecar(mutatedPod, &corev1.Container{
+	sidecarContainer := &corev1.Container{
 		Name:  "scale-to-zero",
 		Image: impl.sidecarImage,
 		Env: []corev1.EnvVar{
@@ -123,7 +124,16 @@ func (impl Implementation) reconcileMetadata(
 				Value: impl.logLevel,
 			},
 		},
-	}, false)
+		Resources: impl.sidecarResources,
+	}
+
+	logger.Info("injecting sidecar with resources",
+		"namespace", pod.Namespace,
+		"cluster", cluster.Name,
+		"pod", pod.Name,
+		"resources", sidecarContainer.Resources)
+
+	err = object.InjectPluginSidecar(mutatedPod, sidecarContainer, false)
 	if err != nil {
 		return nil, err
 	}

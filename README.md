@@ -101,8 +101,74 @@ kubectl apply -f rbac-template.yaml
 
 Or see the [RBAC template](doc/examples/rbac-template.yaml) for manual customization.
 
+#### Resource Configuration
 
+The plugin allows you to configure resource requests and limits for the injected sidecar containers through environment variables in the plugin deployment. This enables you to tune resource allocation based on your cluster requirements.
 
+**Default Sidecar Resources:**
+
+- CPU Request: `50m` (0.05 cores)
+- CPU Limit: `200m` (0.2 cores)
+- Memory Request: `64Mi`
+- Memory Limit: `128Mi`
+
+**Override via Environment Variables:**
+
+You can override these defaults by modifying the plugin deployment manifest before applying it:
+
+```yaml
+# In manifest.yaml, find the deployment and modify the env section:
+env:
+  - name: LOG_LEVEL
+    value: info
+  - name: SIDECAR_CPU_REQUEST
+    value: "100m"
+  - name: SIDECAR_CPU_LIMIT
+    value: "500m"
+  - name: SIDECAR_MEMORY_REQUEST
+    value: "128Mi"
+  - name: SIDECAR_MEMORY_LIMIT
+    value: "256Mi"
+```
+
+**Override at Runtime:**
+
+You can also update resource configuration after deployment using kubectl:
+
+```bash
+# Update sidecar resource configuration
+kubectl set env deployment/scale-to-zero -n cnpg-system \
+  SIDECAR_CPU_REQUEST=100m \
+  SIDECAR_CPU_LIMIT=500m \
+  SIDECAR_MEMORY_REQUEST=128Mi \
+  SIDECAR_MEMORY_LIMIT=256Mi
+
+# Restart the plugin to apply changes
+kubectl rollout restart deployment/scale-to-zero -n cnpg-system
+```
+
+**ConfigMap Override:**
+
+For environment-specific configurations, you can create a ConfigMap:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: scale-to-zero-resource-overrides
+  namespace: cnpg-system
+data:
+  SIDECAR_CPU_REQUEST: "200m"
+  SIDECAR_MEMORY_LIMIT: "512Mi"
+---
+# Then reference it in the deployment by adding to envFrom:
+envFrom:
+  - configMapRef:
+      name: scale-to-zero-resource-overrides
+      optional: true
+```
+
+These resource configurations apply to all sidecar containers injected by the plugin across all clusters.
 
 ## Monitoring and Observability
 
