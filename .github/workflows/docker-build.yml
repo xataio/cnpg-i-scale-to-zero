@@ -43,13 +43,23 @@ env:
   IMAGE_NAME_SIDECAR: ${{ github.repository }}-sidecar
 
 jobs:
-  build-docker-images:
+  build-images:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
       packages: write
     environment: ${{ inputs.environment || null }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - dockerfile: ./Dockerfile.plugin
+            image_name: ${{ github.repository }}
+            build_name: plugin
+          - dockerfile: ./Dockerfile.sidecar
+            image_name: ${{ github.repository }}-sidecar
+            build_name: sidecar
 
     steps:
       - name: Checkout code
@@ -66,40 +76,23 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push multi-platform plugin image
+      - name: Build and push multi-platform ${{ matrix.build_name }} image
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./Dockerfile.plugin
+          file: ${{ matrix.dockerfile }}
           platforms: linux/amd64,linux/arm64
           push: ${{ inputs.should_push }}
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PLUGIN }}:${{ inputs.image_tag }}
-            ${{ inputs.should_push && !contains(inputs.image_tag, 'pr-') && startsWith(inputs.image_tag, 'main-') && format('{0}/{1}:main', env.REGISTRY, env.IMAGE_NAME_PLUGIN) || '' }}
-            ${{ inputs.should_push && !contains(inputs.image_tag, 'pr-') && startsWith(inputs.image_tag, 'v') && format('{0}/{1}:latest', env.REGISTRY, env.IMAGE_NAME_PLUGIN) || '' }}
+            ${{ env.REGISTRY }}/${{ matrix.image_name }}:${{ inputs.image_tag }}
+            ${{ inputs.should_push && !contains(inputs.image_tag, 'pr-') && startsWith(inputs.image_tag, 'main-') && format('{0}/{1}:main', env.REGISTRY, matrix.image_name) || '' }}
+            ${{ inputs.should_push && !contains(inputs.image_tag, 'pr-') && startsWith(inputs.image_tag, 'v') && format('{0}/{1}:latest', env.REGISTRY, matrix.image_name) || '' }}
           build-args: |
             VERSION=${{ inputs.image_tag }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Build and push multi-platform sidecar image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile.sidecar
-          platforms: linux/amd64,linux/arm64
-          push: ${{ inputs.should_push }}
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_SIDECAR }}:${{ inputs.image_tag }}
-            ${{ inputs.should_push && !contains(inputs.image_tag, 'pr-') && startsWith(inputs.image_tag, 'main-') && format('{0}/{1}:main', env.REGISTRY, env.IMAGE_NAME_SIDECAR) || '' }}
-            ${{ inputs.should_push && !contains(inputs.image_tag, 'pr-') && startsWith(inputs.image_tag, 'v') && format('{0}/{1}:latest', env.REGISTRY, env.IMAGE_NAME_SIDECAR) || '' }}
-          build-args: |
-            VERSION=${{ inputs.image_tag }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
   generate-manifest:
     runs-on: ubuntu-latest
+    needs: [build-images]
     if: inputs.generate_manifest
     steps:
       - name: Checkout code
