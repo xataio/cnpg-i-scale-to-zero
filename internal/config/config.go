@@ -24,12 +24,14 @@ type ResourceConfig struct {
 }
 
 const (
-	defaultSidecarImage  = "ghcr.io/xataio/cnpg-i-scale-to-zero-sidecar:main"
-	defaultLogLevel      = "info"
-	defaultCPURequest    = "50m"
-	defaultCPULimit      = "200m"
+	defaultSidecarImage = "ghcr.io/xataio/cnpg-i-scale-to-zero-sidecar:main"
+	defaultLogLevel     = "info"
+	defaultCPURequest   = "50m"
+	defaultCPULimit     = "200m"
+	// for memory the request and limit are set to the same value to prevent OOM
+	// issues
 	defaultMemoryRequest = "64Mi"
-	defaultMemoryLimit   = "128Mi"
+	defaultMemoryLimit   = "64Mi"
 )
 
 // New creates a new Config instance with the provided parameters.
