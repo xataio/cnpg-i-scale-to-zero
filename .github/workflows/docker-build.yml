@@ -50,11 +50,6 @@ jobs:
       contents: read
       packages: write
     environment: ${{ inputs.environment || null }}
-    strategy:
-      fail-fast: false
-      matrix:
-        platform: [linux/amd64, linux/arm64]
-        image: [plugin, sidecar]
 
     steps:
       - name: Checkout code
@@ -71,83 +66,37 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract platform name
-        id: platform
-        run: echo "name=$(echo ${{ matrix.platform }} | tr '/' '-')" >> $GITHUB_OUTPUT
-
-      - name: Set image variables
-        id: image
-        run: |
-          if [ "${{ matrix.image }}" = "plugin" ]; then
-            echo "dockerfile=./Dockerfile.plugin" >> $GITHUB_OUTPUT
-            echo "name=${{ env.IMAGE_NAME_PLUGIN }}" >> $GITHUB_OUTPUT
-          else
-            echo "dockerfile=./Dockerfile.sidecar" >> $GITHUB_OUTPUT
-            echo "name=${{ env.IMAGE_NAME_SIDECAR }}" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Build and push Docker image
+      - name: Build and push multi-platform plugin image
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ${{ steps.image.outputs.dockerfile }}
-          platforms: ${{ matrix.platform }}
+          file: ./Dockerfile.plugin
+          platforms: linux/amd64,linux/arm64
           push: ${{ inputs.should_push }}
-          tags: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${{ inputs.image_tag }}-${{ steps.platform.outputs.name }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_PLUGIN }}:${{ inputs.image_tag }}
+            ${{ inputs.should_push && !contains(inputs.image_tag, 'pr-') && startsWith(inputs.image_tag, 'main-') && format('{0}/{1}:main', env.REGISTRY, env.IMAGE_NAME_PLUGIN) || '' }}
+            ${{ inputs.should_push && !contains(inputs.image_tag, 'pr-') && startsWith(inputs.image_tag, 'v') && format('{0}/{1}:latest', env.REGISTRY, env.IMAGE_NAME_PLUGIN) || '' }}
           build-args: |
             VERSION=${{ inputs.image_tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  create-manifests-and-tags:
-    runs-on: ubuntu-latest
-    needs: [build-docker-images]
-    if: inputs.should_push
-    timeout-minutes: 15
-    permissions:
-      contents: read
-      packages: write
-
-    steps:
-      - name: Log in to Container Registry
-        uses: docker/login-action@v3
+      - name: Build and push multi-platform sidecar image
+        uses: docker/build-push-action@v5
         with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Create multi-platform manifests and tags
-        run: |
-          # Helper function to create manifest for an image
-          create_manifest() {
-            local image_name=$1
-            local tag=$2
-            docker buildx imagetools create -t ${REGISTRY}/${image_name}:${tag} \
-              ${REGISTRY}/${image_name}:${{ inputs.image_tag }}-linux-amd64 \
-              ${REGISTRY}/${image_name}:${{ inputs.image_tag }}-linux-arm64
-          }
-
-          # Create primary manifests
-          create_manifest "${{ env.IMAGE_NAME_PLUGIN }}" "${{ inputs.image_tag }}"
-          create_manifest "${{ env.IMAGE_NAME_SIDECAR }}" "${{ inputs.image_tag }}"
-
-          # Create moving tags (skip for PR builds)
-          if [[ ! "${{ inputs.image_tag }}" =~ pr- ]]; then
-            # Create 'main' tags for main branch builds
-            if [[ "${{ inputs.image_tag }}" =~ ^main- ]]; then
-              create_manifest "${{ env.IMAGE_NAME_PLUGIN }}" "main"
-              create_manifest "${{ env.IMAGE_NAME_SIDECAR }}" "main"
-            fi
-
-            # Create 'latest' tags for releases
-            if [[ "${{ inputs.image_tag }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
-              create_manifest "${{ env.IMAGE_NAME_PLUGIN }}" "latest"
-              create_manifest "${{ env.IMAGE_NAME_SIDECAR }}" "latest"
-            fi
-          fi
+          context: .
+          file: ./Dockerfile.sidecar
+          platforms: linux/amd64,linux/arm64
+          push: ${{ inputs.should_push }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_SIDECAR }}:${{ inputs.image_tag }}
+            ${{ inputs.should_push && !contains(inputs.image_tag, 'pr-') && startsWith(inputs.image_tag, 'main-') && format('{0}/{1}:main', env.REGISTRY, env.IMAGE_NAME_SIDECAR) || '' }}
+            ${{ inputs.should_push && !contains(inputs.image_tag, 'pr-') && startsWith(inputs.image_tag, 'v') && format('{0}/{1}:latest', env.REGISTRY, env.IMAGE_NAME_SIDECAR) || '' }}
+          build-args: |
+            VERSION=${{ inputs.image_tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   generate-manifest:
     runs-on: ubuntu-latest
