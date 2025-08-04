@@ -1,0 +1,140 @@
+name: Reusable Docker Build
+
+# Reusable workflow for building and pushing Docker images
+# Used by both CI and PR image workflows
+
+on:
+  workflow_call:
+    inputs:
+      image_tag:
+        description: "Tag to use for the images"
+        required: true
+        type: string
+      should_push:
+        description: "Whether to push images to registry"
+        required: false
+        type: boolean
+        default: true
+      generate_manifest:
+        description: "Whether to generate Kubernetes manifest"
+        required: false
+        type: boolean
+        default: false
+      manifest_name:
+        description: "Name for the manifest artifact"
+        required: false
+        type: string
+        default: "kubernetes-manifest"
+      environment:
+        description: "Environment to use for approval (optional)"
+        required: false
+        type: string
+    outputs:
+      plugin_image:
+        description: "Full plugin image name with tag"
+        value: ghcr.io/${{ github.repository }}:${{ inputs.image_tag }}
+      sidecar_image:
+        description: "Full sidecar image name with tag"
+        value: ghcr.io/${{ github.repository }}-sidecar:${{ inputs.image_tag }}
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME_PLUGIN: ${{ github.repository }}
+  IMAGE_NAME_SIDECAR: ${{ github.repository }}-sidecar
+
+jobs:
+  build-images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    environment: ${{ inputs.environment || null }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - dockerfile: ./Dockerfile.plugin
+            image_suffix: ""
+            build_name: plugin
+          - dockerfile: ./Dockerfile.sidecar
+            image_suffix: "-sidecar"
+            build_name: sidecar
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        if: inputs.should_push
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set image name
+        id: image
+        run: echo "name=${{ github.repository }}${{ matrix.image_suffix }}" >> $GITHUB_OUTPUT
+
+      - name: Generate additional tags
+        id: tags
+        run: |
+          TAGS="${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${{ inputs.image_tag }}"
+
+          # Add 'main' tag for main branch builds (non-PR)
+          if [[ "${{ inputs.should_push }}" == "true" && "${{ inputs.image_tag }}" != *"pr-"* && "${{ inputs.image_tag }}" == "main-"* ]]; then
+            TAGS="${TAGS},${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:main"
+          fi
+
+          # Add 'latest' tag for release builds (version tags)
+          if [[ "${{ inputs.should_push }}" == "true" && "${{ inputs.image_tag }}" != *"pr-"* && "${{ inputs.image_tag }}" == "v"* ]]; then
+            TAGS="${TAGS},${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:latest"
+          fi
+
+          echo "tags=$TAGS" >> $GITHUB_OUTPUT
+
+      - name: Build and push multi-platform ${{ matrix.build_name }} image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: ${{ inputs.should_push }}
+          tags: ${{ steps.tags.outputs.tags }}
+          build-args: |
+            VERSION=${{ inputs.image_tag }}
+
+  generate-manifest:
+    runs-on: ubuntu-latest
+    needs: [build-images]
+    if: inputs.generate_manifest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install kustomize
+        run: |
+          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          sudo mv kustomize /usr/local/bin/
+
+      - name: Update kustomization with image tag
+        run: |
+          # Update the plugin image tag in kustomization.yaml
+          sed -i "s/newTag: main/newTag: ${{ inputs.image_tag }}/g" kubernetes/kustomization.yaml
+
+          # Update the secret generator value to use the correct sidecar tag
+          sed -i "s|ghcr.io/xataio/cnpg-i-scale-to-zero-sidecar:main|ghcr.io/xataio/cnpg-i-scale-to-zero-sidecar:${{ inputs.image_tag }}|g" kubernetes/kustomization.yaml
+
+      - name: Generate manifest
+        run: make manifest
+
+      - name: Upload manifest artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.manifest_name }}
+          path: manifest.yaml
+          retention-days: 7
