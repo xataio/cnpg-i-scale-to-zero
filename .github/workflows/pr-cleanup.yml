@@ -17,6 +17,8 @@ jobs:
       contents: read
       packages: write
       actions: write
+      pull-requests: write # Add permission to comment on PRs
+      issues: write # Add permission to comment on issues (PRs are issues)
     steps:
       - name: Delete PR images and artifacts
         uses: actions/github-script@v7
@@ -102,7 +104,10 @@ jobs:
       - name: Comment on PR about cleanup
         if: github.event.pull_request.merged == true
         uses: actions/github-script@v7
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const prNumber = ${{ github.event.number }};
             const body = `🧹 **PR Resources Cleaned Up**
