@@ -8,6 +8,10 @@ on:
 
 env:
   REGISTRY: ghcr.io
+  # Shared cleanup configuration
+  PACKAGES: "cnpg-i-scale-to-zero,cnpg-i-scale-to-zero-sidecar"
+  EXCLUDE_TAGS: "v*,latest,main"
+  DELETE_TAGS: "main-*"
 
 jobs:
   preview:
@@ -18,17 +22,13 @@ jobs:
     steps:
       - name: Preview cleanup (dry run)
         uses: dataaxiom/ghcr-cleanup-action@v1
-        with: &cleanup-config
+        with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          packages: "cnpg-i-scale-to-zero,cnpg-i-scale-to-zero-sidecar"
-          # Keep version tags (v1.2.3), latest tag, and most recent main tag
-          exclude-tags: "v*,latest,main"
-          # Delete old main- development images and untagged images
-          delete-tags: "main-*"
+          packages: ${{ env.PACKAGES }}
+          exclude-tags: ${{ env.EXCLUDE_TAGS }}
+          delete-tags: ${{ env.DELETE_TAGS }}
           delete-untagged: true
-          # Enhanced logging
           log-level: "info"
-          # Dry run mode - overridden in cleanup job
           dry-run: true
 
   cleanup:
@@ -44,6 +44,10 @@ jobs:
       - name: Cleanup old container images
         uses: dataaxiom/ghcr-cleanup-action@v1
         with:
-          <<: *cleanup-config
-          # Override: actually perform the cleanup
+          token: ${{ secrets.GITHUB_TOKEN }}
+          packages: ${{ env.PACKAGES }}
+          exclude-tags: ${{ env.EXCLUDE_TAGS }}
+          delete-tags: ${{ env.DELETE_TAGS }}
+          delete-untagged: true
+          log-level: "info"
           dry-run: false
