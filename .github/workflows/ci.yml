@@ -222,11 +222,7 @@ jobs:
 
       - name: Upload manifest to release
         if: github.event_name == 'release'
-        uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: ./manifest.yaml
-          asset_name: manifest.yaml
-          asset_content_type: application/x-yaml
+        run: |
+          gh release upload ${{ github.event.release.tag_name }} ./manifest.yaml --clobber
