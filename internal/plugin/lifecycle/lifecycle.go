@@ -100,7 +100,6 @@ func (impl Implementation) reconcileMetadata(
 		return &lifecycle.OperatorLifecycleResponse{}, nil
 	}
 
-	logger.Info("injecting sidecar into pod", "pod", pod.Name, "primary", cluster.Status.CurrentPrimary)
 	mutatedPod := pod.DeepCopy()
 
 	sidecarContainer := &corev1.Container{
@@ -127,10 +126,11 @@ func (impl Implementation) reconcileMetadata(
 		Resources: impl.sidecarResources,
 	}
 
-	logger.Info("injecting sidecar with resources",
+	logger.Info("injecting sidecar into cluster pod",
 		"namespace", pod.Namespace,
 		"cluster", cluster.Name,
 		"pod", pod.Name,
+		"primary", cluster.Status.CurrentPrimary,
 		"resources", sidecarContainer.Resources)
 
 	err = object.InjectPluginSidecar(mutatedPod, sidecarContainer, false)

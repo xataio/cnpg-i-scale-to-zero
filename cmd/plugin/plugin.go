@@ -65,9 +65,9 @@ func newCmd() *cobra.Command {
 // NewResourceConfig creates a new ResourceConfig with environment variable overrides
 func newResourceConfig() *config.ResourceConfig {
 	return &config.ResourceConfig{
-		CPURequest:    viper.GetString("SIDECAR_CPU_REQUEST"),
-		CPULimit:      viper.GetString("SIDECAR_CPU_LIMIT"),
-		MemoryRequest: viper.GetString("SIDECAR_MEMORY_REQUEST"),
-		MemoryLimit:   viper.GetString("SIDECAR_MEMORY_LIMIT"),
+		CPURequest:    viper.GetString("sidecar-cpu-request"),
+		CPULimit:      viper.GetString("sidecar-cpu-limit"),
+		MemoryRequest: viper.GetString("sidecar-memory-request"),
+		MemoryLimit:   viper.GetString("sidecar-memory-limit"),
 	}
 }
