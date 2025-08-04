@@ -1,0 +1,121 @@
+name: PR Image Cleanup
+
+# Automatically cleans up PR images when PR is closed/merged
+on:
+  pull_request:
+    types: [closed]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME_PLUGIN: ${{ github.repository }}
+  IMAGE_NAME_SIDECAR: ${{ github.repository }}-sidecar
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      actions: write
+    steps:
+      - name: Delete PR images and artifacts
+        uses: actions/github-script@v7
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          script: |
+            const prNumber = ${{ github.event.number }};
+            const prTag = `pr-${prNumber}-`;
+            const artifactName = `kubernetes-manifest-pr-${prNumber}`;
+
+            console.log(`🧹 Cleaning up resources for PR #${prNumber}`);
+
+            // Helper function to extract package name from full image name
+            const getPackageName = (imageName) => imageName.split('/').pop();
+
+            // Delete container images
+            const imageNames = [
+              '${{ env.IMAGE_NAME_PLUGIN }}',
+              '${{ env.IMAGE_NAME_SIDECAR }}'
+            ];
+
+            for (const imageName of imageNames) {
+              const packageName = getPackageName(imageName);
+              console.log(`Checking for images in package: ${packageName}`);
+
+              try {
+                const { data: versions } = await github.rest.packages.getAllPackageVersionsForPackageOwnedByOrg({
+                  package_type: 'container',
+                  package_name: packageName,
+                  org: context.repo.owner
+                });
+
+                for (const version of versions) {
+                  // Check if any tag starts with our PR tag
+                  const hasPrTag = version.metadata?.container?.tags?.some(tag => tag.startsWith(prTag));
+
+                  if (hasPrTag) {
+                    await github.rest.packages.deletePackageVersionForOrg({
+                      package_type: 'container',
+                      package_name: packageName,
+                      org: context.repo.owner,
+                      package_version_id: version.id
+                    });
+                    console.log(`✅ Deleted image version: ${packageName} with tags: ${version.metadata.container.tags.join(', ')}`);
+                  }
+                }
+              } catch (error) {
+                console.log(`ℹ️  No images found for ${packageName} or access denied: ${error.message}`);
+              }
+            }
+
+            // Delete workflow artifacts
+            try {
+              const { data: artifacts } = await github.rest.actions.listArtifactsForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per_page: 100
+              });
+
+              let deletedCount = 0;
+              for (const artifact of artifacts.artifacts) {
+                if (artifact.name === artifactName) {
+                  await github.rest.actions.deleteArtifact({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    artifact_id: artifact.id
+                  });
+                  deletedCount++;
+                  console.log(`🗑️  Deleted artifact: ${artifact.name}`);
+                }
+              }
+
+              if (deletedCount > 0) {
+                console.log(`✅ Deleted ${deletedCount} artifacts for PR #${prNumber}`);
+              }
+            } catch (error) {
+              console.log(`ℹ️  Could not clean up artifacts: ${error.message}`);
+            }
+
+            console.log(`🎉 Cleanup completed for PR #${prNumber}`);
+
+      - name: Comment on PR about cleanup
+        if: github.event.pull_request.merged == true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = ${{ github.event.number }};
+            const body = `🧹 **PR Resources Cleaned Up**
+
+            Since this PR has been merged, the following test resources have been automatically deleted:
+            - Container images: \`pr-${prNumber}-*\`
+            - Kubernetes manifest artifacts
+
+            Thanks for testing! 🎉`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
