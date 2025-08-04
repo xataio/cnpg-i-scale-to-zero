@@ -38,20 +38,10 @@ jobs:
               version: /^v\d+\.\d+(\.\d+)?$/,
               latest: 'latest',
               main: 'main',
-              prPrefix: 'pr-',
-              developmentPrefixes: ['pr-', 'main-']
+              developmentPrefixes: ['main-']
             };
 
             const owner = context.repo.owner;
-
-            // Get list of open PRs once for all packages
-            const { data: openPRs } = await github.rest.pulls.list({
-              owner: owner,
-              repo: context.repo.repo,
-              state: 'open'
-            });
-            const openPRNumbers = new Set(openPRs.map(pr => pr.number));
-            console.log(`📋 Found ${openPRNumbers.size} open PRs: ${Array.from(openPRNumbers).join(', ')}`);
 
             // Reusable analysis function
             async function analyzePackage(packageName) {
@@ -100,36 +90,12 @@ jobs:
                     }
                   }
 
-                  // Check PR tags first
-                  const prTags = tags.filter(tag => tag.startsWith(tagPatterns.prPrefix));
-                  let isOpenPR = false;
-
-                  if (prTags.length > 0) {
-                    for (const prTag of prTags) {
-                      const prMatch = prTag.match(/^pr-(\d+)$/);
-                      if (prMatch) {
-                        const prNumber = parseInt(prMatch[1], 10);
-                        if (openPRNumbers.has(prNumber)) {
-                          isOpenPR = true;
-                          break;
-                        }
-                      }
-                    }
-                  }
-
-                  if (isOpenPR) {
-                    keepVersionIds.add(version.id);
-                    console.log(`✅ WILL KEEP: ${tags.join(', ')} (open PR)`);
-                    continue;
-                  }
-
                   const shouldDelete = tags.some(tag =>
                     tagPatterns.developmentPrefixes.some(prefix => tag.startsWith(prefix))
                   ) || tags.length === 0;
 
                   if (shouldDelete) {
-                    const reason = tags.length === 0 ? 'untagged SHA256' :
-                                 tags.some(tag => tag.startsWith(tagPatterns.prPrefix)) ? 'closed PR image' : 'development image';
+                    const reason = tags.length === 0 ? 'untagged SHA256' : 'development image';
                     deleteVersionIds.push(version.id);
                     const tagDisplay = tags.length > 0 ? tags.join(', ') : 'untagged';
                     console.log(`🗑️ WILL DELETE: [${tagDisplay}] (${reason})`);
