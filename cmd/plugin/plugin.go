@@ -31,6 +31,10 @@ func main() {
 
 	_ = viper.BindEnv("sidecar-image", "SIDECAR_IMAGE")
 	_ = viper.BindEnv("log-level", "LOG_LEVEL")
+	_ = viper.BindEnv("sidecar-cpu-request", "SIDECAR_CPU_REQUEST")
+	_ = viper.BindEnv("sidecar-cpu-limit", "SIDECAR_CPU_LIMIT")
+	_ = viper.BindEnv("sidecar-memory-request", "SIDECAR_MEMORY_REQUEST")
+	_ = viper.BindEnv("sidecar-memory-limit", "SIDECAR_MEMORY_LIMIT")
 
 	logFlags.AddFlags(rootCmd.PersistentFlags())
 
@@ -46,7 +50,7 @@ func main() {
 func newCmd() *cobra.Command {
 	cmd := http.CreateMainCmd(identity.Implementation{}, func(server *grpc.Server) error {
 		// Create config at execution time to ensure viper has loaded environment variables
-		cfg := config.New(viper.GetString("sidecar-image"), viper.GetString("log-level"))
+		cfg := config.New(viper.GetString("sidecar-image"), viper.GetString("log-level"), newResourceConfig())
 
 		// Register the declared implementations
 		lifecycle.RegisterOperatorLifecycleServer(server, lifecycleImpl.NewImplementation(cfg))
@@ -56,4 +60,14 @@ func newCmd() *cobra.Command {
 	cmd.Use = "plugin"
 
 	return cmd
+}
+
+// NewResourceConfig creates a new ResourceConfig with environment variable overrides
+func newResourceConfig() *config.ResourceConfig {
+	return &config.ResourceConfig{
+		CPURequest:    viper.GetString("sidecar-cpu-request"),
+		CPULimit:      viper.GetString("sidecar-cpu-limit"),
+		MemoryRequest: viper.GetString("sidecar-memory-request"),
+		MemoryLimit:   viper.GetString("sidecar-memory-limit"),
+	}
 }

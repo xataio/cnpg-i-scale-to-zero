@@ -105,6 +105,14 @@ spec:
         env:
         - name: LOG_LEVEL
           value: debug
+        - name: SIDECAR_CPU_REQUEST
+          value: 50m
+        - name: SIDECAR_CPU_LIMIT
+          value: 200m
+        - name: SIDECAR_MEMORY_REQUEST
+          value: 64Mi
+        - name: SIDECAR_MEMORY_LIMIT
+          value: 128Mi
         envFrom:
         - secretRef:
             name: scale-to-zero-config-tcb898m758
@@ -128,7 +136,13 @@ spec:
           tcpSocket:
             port: 9090
           timeoutSeconds: 5
-        resources: {}
+        resources:
+          limits:
+            cpu: 500m
+            memory: 256Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
         volumeMounts:
         - mountPath: /server
           name: server
