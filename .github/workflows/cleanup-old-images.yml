@@ -57,7 +57,7 @@ jobs:
                 for (const version of sortedVersions) {
                   const tags = version.metadata?.container?.tags || [];
 
-                  const hasVersionTag = tags.some(tag => tag.startsWith('v') && /^v\d+\.\d+(\.\d+)?/.test(tag));
+                  const hasVersionTag = tags.some(tag => /^v\d+\.\d+(\.\d+)?$/.test(tag));
                   const hasLatestTag = tags.some(tag => tag === 'latest');
 
                   if (hasVersionTag || hasLatestTag) {
@@ -148,27 +148,32 @@ jobs:
       packages: write
     strategy:
       matrix:
-        include:
-          - package: cnpg-i-scale-to-zero
-            deletions-output: plugin-deletions
-            has-deletions-output: plugin-has-deletions
-          - package: cnpg-i-scale-to-zero-sidecar
-            deletions-output: sidecar-deletions
-            has-deletions-output: sidecar-has-deletions
+        package:
+          - cnpg-i-scale-to-zero
+          - cnpg-i-scale-to-zero-sidecar
     steps:
       - name: Delete old container images
-        if: needs.preview.outputs[matrix.has-deletions-output] == 'true'
         uses: actions/github-script@v7
         with:
           script: |
             const packageName = '${{ matrix.package }}';
             const owner = context.repo.owner;
 
-            // Get the delete list from the preview job outputs
-            const deleteVersionIdsJson = `${{ needs.preview.outputs[matrix.deletions-output] }}` || '[]';
-            const deleteVersionIds = JSON.parse(deleteVersionIdsJson);
+            // Get the delete list from the preview job outputs based on package name
+            let deleteVersionIds = [];
+            let hasDeletions = false;
 
-            if (deleteVersionIds.length === 0) {
+            if (packageName === 'cnpg-i-scale-to-zero') {
+              const deleteVersionIdsJson = `${{ needs.preview.outputs.plugin-deletions }}` || '[]';
+              deleteVersionIds = JSON.parse(deleteVersionIdsJson);
+              hasDeletions = '${{ needs.preview.outputs.plugin-has-deletions }}' === 'true';
+            } else if (packageName === 'cnpg-i-scale-to-zero-sidecar') {
+              const deleteVersionIdsJson = `${{ needs.preview.outputs.sidecar-deletions }}` || '[]';
+              deleteVersionIds = JSON.parse(deleteVersionIdsJson);
+              hasDeletions = '${{ needs.preview.outputs.sidecar-has-deletions }}' === 'true';
+            }
+
+            if (!hasDeletions || deleteVersionIds.length === 0) {
               console.log(`✨ No cleanup needed for ${packageName}`);
               return;
             }
@@ -195,7 +200,3 @@ jobs:
             }
 
             console.log(`🎉 Cleanup completed for ${packageName}: ${deletedCount}/${deleteVersionIds.length} versions deleted`);
-
-      - name: Skip cleanup
-        if: needs.preview.outputs[matrix.has-deletions-output] != 'true'
-        run: echo "✨ No cleanup needed for ${{ matrix.package }}"
