@@ -68,6 +68,9 @@ jobs:
     needs: [docker-build]
     if: github.event_name == 'release'
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Download manifest artifact
         uses: actions/download-artifact@v4
         with:
