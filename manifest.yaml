@@ -112,7 +112,7 @@ spec:
         - name: SIDECAR_MEMORY_REQUEST
           value: 64Mi
         - name: SIDECAR_MEMORY_LIMIT
-          value: 128Mi
+          value: 64Mi
         envFrom:
         - secretRef:
             name: scale-to-zero-config-tcb898m758
@@ -139,7 +139,7 @@ spec:
         resources:
           limits:
             cpu: 500m
-            memory: 256Mi
+            memory: 128Mi
           requests:
             cpu: 100m
             memory: 128Mi

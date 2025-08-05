@@ -44,7 +44,7 @@ spec:
         - name: SIDECAR_MEMORY_REQUEST
           value: "64Mi"
         - name: SIDECAR_MEMORY_LIMIT
-          value: "128Mi"
+          value: "64Mi"
         envFrom:
         # use a secret instead of an env variable to configure the sidecar image
         # so that the image mapping works out of the box
@@ -61,7 +61,7 @@ spec:
             memory: "128Mi"
           limits:
             cpu: "500m"
-            memory: "256Mi"
+            memory: "128Mi"
         livenessProbe:
           tcpSocket:
             port: 9090

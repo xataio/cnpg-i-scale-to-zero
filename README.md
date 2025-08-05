@@ -110,7 +110,7 @@ The plugin allows you to configure resource requests and limits for the injected
 - CPU Request: `50m` (0.05 cores)
 - CPU Limit: `200m` (0.2 cores)
 - Memory Request: `64Mi`
-- Memory Limit: `128Mi`
+- Memory Limit: `64Mi`
 
 **Override via Environment Variables:**
 
@@ -128,7 +128,7 @@ env:
   - name: SIDECAR_MEMORY_REQUEST
     value: "128Mi"
   - name: SIDECAR_MEMORY_LIMIT
-    value: "256Mi"
+    value: "128Mi"
 ```
 
 **Override at Runtime:**
@@ -141,7 +141,7 @@ kubectl set env deployment/scale-to-zero -n cnpg-system \
   SIDECAR_CPU_REQUEST=100m \
   SIDECAR_CPU_LIMIT=500m \
   SIDECAR_MEMORY_REQUEST=128Mi \
-  SIDECAR_MEMORY_LIMIT=256Mi
+  SIDECAR_MEMORY_LIMIT=128Mi
 
 # Restart the plugin to apply changes
 kubectl rollout restart deployment/scale-to-zero -n cnpg-system

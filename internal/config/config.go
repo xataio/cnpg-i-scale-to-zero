@@ -54,7 +54,7 @@ func New(sidecarImage, logLevel string, resourceConfig *ResourceConfig) *Config 
 
 // ToResourceRequirements converts the SidecarResourceConfig to Kubernetes
 // ResourceRequirements, applying defaults if necessary.
-// Defaults to 50m CPU request, 200m CPU limit, 64Mi memory request, and 128Mi memory limit.
+// Defaults to 50m CPU request, 200m CPU limit, and 64Mi memory request and memory limit.
 func (src *ResourceConfig) ToResourceRequirements() corev1.ResourceRequirements {
 	requirements := corev1.ResourceRequirements{
 		Requests: make(corev1.ResourceList),
