@@ -62,7 +62,7 @@ func newScaleToZero(ctx context.Context, cfg config, client client.Client) (*sca
 		pgQuerierFactory: func(ctx context.Context, url string) (postgres.Querier, error) {
 			return postgres.NewConnPool(ctx, url)
 		},
-		lastActive: time.Now(),
+		lastActive: time.Time{},
 	}
 
 	if err := s.initQuerier(ctx); err != nil {
@@ -91,6 +91,10 @@ func (s *scaleToZero) Start(ctx context.Context) error {
 			}
 
 			if !scaleToZeroConfig.enabled {
+				// reset last active time if scale to zero is disabled. This
+				// prevents old activity tracking from kicking in when scale to
+				// zero is re-enabled.
+				s.lastActive = time.Time{}
 				contextLogger.Info("scale to zero is disabled, skipping check")
 				continue
 			}
@@ -157,11 +161,16 @@ func (s *scaleToZero) isClusterActive(ctx context.Context, inactivityMinutes int
 	}
 	log.FromContext(ctx).Info("open connections count", "count", openConns)
 
-	if openConns > 0 {
+	// if there are open connections or if the last active time is not set, we
+	// consider the cluster active. The last active time not being set means
+	// either the sidecar has just started or the scale to zero setting has been
+	// re-enabled and we need to restart the activity tracking.
+	if openConns > 0 || s.lastActive.IsZero() {
 		s.lastActive = time.Now()
 		return true, nil
 	}
 
+	log.FromContext(ctx).Debug("time since last active", "duration", time.Since(s.lastActive).String())
 	if time.Since(s.lastActive).Minutes() >= float64(inactivityMinutes) {
 		return false, nil
 	}
