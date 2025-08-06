@@ -318,6 +318,48 @@ func TestScaleToZero_isClusterActive(t *testing.T) {
 		wantErr        error
 	}{
 		{
+			name:   "last active is zero, cluster is not active",
+			client: &mockClusterClient{},
+			querier: &mockQuerier{
+				queryFunc: func(ctx context.Context, query string, args ...any) (postgres.Row, error) {
+					return &mockRow{
+						scanFn: func(dest ...any) error {
+							count, ok := dest[0].(*int)
+							require.True(t, ok)
+							*count = 0
+							return nil
+						},
+					}, nil
+				},
+			},
+			lastActive: time.Time{},
+
+			wantLastActive: now,
+			wantActive:     true,
+			wantErr:        nil,
+		},
+		{
+			name:   "last active is zero, cluster is active",
+			client: &mockClusterClient{},
+			querier: &mockQuerier{
+				queryFunc: func(ctx context.Context, query string, args ...any) (postgres.Row, error) {
+					return &mockRow{
+						scanFn: func(dest ...any) error {
+							count, ok := dest[0].(*int)
+							require.True(t, ok)
+							*count = 2
+							return nil
+						},
+					}, nil
+				},
+			},
+			lastActive: time.Time{},
+
+			wantLastActive: now,
+			wantActive:     true,
+			wantErr:        nil,
+		},
+		{
 			name:   "openConnections returns error",
 			client: &mockClusterClient{},
 			querier: &mockQuerier{
