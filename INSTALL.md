@@ -36,9 +36,9 @@ make deploy
 # Create a kind cluster
 kind create cluster --name cnpg-i-scale-to-zero
 
-# Install CloudNativePG
+# Install CloudNativePG (at least version 1.26.0)
 kubectl apply --server-side -f \
-  https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v1.24.1/cnpg-1.24.1.yaml
+  https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v1.26.0/cnpg-1.26.0.yaml
 
 # Install cert-manager
 kubectl apply -f \
@@ -142,13 +142,16 @@ make undeploy
 ### Hibernation not working
 
 1. **Check RBAC permissions**: Verify the cluster has the required RBAC configuration:
+
    ```bash
    kubectl get clusterrolebinding my-cluster-scale-to-zero-binding
    ```
+
    If missing, apply the [RBAC template](doc/examples/rbac-template.yaml) with your cluster name and namespace.
 
 2. Check sidecar logs for database connection issues
 3. Verify the cluster annotations are correctly set:
+
    ```bash
    kubectl get cluster my-cluster -o yaml | grep -A 5 annotations
    ```

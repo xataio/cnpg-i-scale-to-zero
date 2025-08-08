@@ -46,6 +46,9 @@ func (impl Implementation) GetCapabilities(
 					{
 						Type: lifecycle.OperatorOperationType_TYPE_CREATE,
 					},
+					{
+						Type: lifecycle.OperatorOperationType_TYPE_EVALUATE,
+					},
 				},
 			},
 		},
@@ -66,11 +69,14 @@ func (impl Implementation) LifecycleHook(
 		return nil, errors.New("no operation set")
 	}
 
+	log.FromContext(ctx).Info("reconciling object", "kind", kind, "operation", operation)
+
 	//nolint: gocritic
 	switch kind {
 	case "Pod":
 		switch *operation {
-		case lifecycle.OperatorOperationType_TYPE_CREATE:
+		case lifecycle.OperatorOperationType_TYPE_CREATE,
+			lifecycle.OperatorOperationType_TYPE_EVALUATE:
 			return impl.reconcileMetadata(ctx, request)
 		}
 	}
