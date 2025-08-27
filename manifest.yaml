@@ -13,6 +13,7 @@ rules:
   - postgresql.cnpg.io
   resources:
   - clusters
+  - scheduledbackups
   verbs:
   - get
   - list

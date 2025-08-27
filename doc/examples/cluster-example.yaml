@@ -30,3 +30,14 @@ spec:
 
   storage:
     size: 1Gi
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: cluster-example
+  namespace: default
+spec:
+  schedule: "0 0 2 * * *"  # Daily at 2 AM (seconds, minutes, hours, day of month, month, day of week)
+  cluster:
+    name: cluster-example
+  backupOwnerReference: self

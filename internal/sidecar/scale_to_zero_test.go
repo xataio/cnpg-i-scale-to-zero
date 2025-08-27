@@ -3,6 +3,7 @@ package sidecar
 import (
 	"context"
 	"errors"
+	"fmt"
 	"syscall"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/xataio/cnpg-i-scale-to-zero/internal/postgres"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 )
 
 func TestScaleToZero_Start(t *testing.T) {
@@ -115,6 +117,174 @@ func TestScaleToZero_Start(t *testing.T) {
 						require.Equal(t, "on", cluster.Annotations[hibernationAnnotation])
 						return nil
 					},
+					getClusterScheduledBackupFunc: func(ctx context.Context) (*cnpgv1.ScheduledBackup, error) {
+						return nil, fmt.Errorf("scheduledbackups.postgresql.cnpg.io \"test-cluster\" not found")
+					},
+				}
+			},
+			querier: func(_ chan struct{}) *mockQuerier {
+				return &mockQuerier{
+					queryFunc: func(ctx context.Context, query string, args ...any) (postgres.Row, error) {
+						return &mockRow{
+							scanFn: func(dest ...any) error {
+								require.Len(t, dest, 1)
+								count, ok := dest[0].(*int)
+								require.True(t, ok)
+								*count = 0 // Simulate an inactive cluster
+								return nil
+							},
+						}, nil
+					},
+				}
+			},
+			lastActive: time.Now().Add(-time.Minute * 10), // Simulate inactivity
+
+			wantErr: nil,
+		},
+		{
+			name: "cluster with scale to zero enabled and inactive cluster, hibernation triggered and scheduled backup paused",
+			client: func(done chan struct{}) *mockClusterClient {
+				return &mockClusterClient{
+					getClusterFunc: func(ctx context.Context, forceUpdate bool) (*cnpgv1.Cluster, error) {
+						return &cnpgv1.Cluster{
+							Status: cnpgv1.ClusterStatus{
+								Phase: healthyClusterStatus,
+							},
+							ObjectMeta: metav1.ObjectMeta{
+								Annotations: map[string]string{
+									scaleToZeroEnabledAnnotation: "true",
+									inactivityMinutesAnnotation:  "5",
+								},
+							},
+						}, nil
+					},
+					updateClusterFunc: func(ctx context.Context, cluster *cnpgv1.Cluster) error {
+						defer func() { done <- struct{}{} }()
+						require.NotNil(t, cluster)
+						require.Equal(t, "on", cluster.Annotations[hibernationAnnotation])
+						return nil
+					},
+					getClusterScheduledBackupFunc: func(ctx context.Context) (*cnpgv1.ScheduledBackup, error) {
+						return &cnpgv1.ScheduledBackup{
+							Spec: cnpgv1.ScheduledBackupSpec{
+								Cluster: cnpgv1.LocalObjectReference{
+									Name: "test-cluster",
+								},
+								Suspend: ptr.To(false),
+							},
+						}, nil
+					},
+					updateClusterScheduledBackupFunc: func(ctx context.Context, scheduledBackup *cnpgv1.ScheduledBackup) error {
+						require.NotNil(t, scheduledBackup)
+						require.Equal(t, "test-cluster", scheduledBackup.Spec.Cluster.Name)
+						require.NotNil(t, scheduledBackup.Spec.Suspend)
+						require.True(t, *scheduledBackup.Spec.Suspend)
+						return nil
+					},
+				}
+			},
+			querier: func(_ chan struct{}) *mockQuerier {
+				return &mockQuerier{
+					queryFunc: func(ctx context.Context, query string, args ...any) (postgres.Row, error) {
+						return &mockRow{
+							scanFn: func(dest ...any) error {
+								require.Len(t, dest, 1)
+								count, ok := dest[0].(*int)
+								require.True(t, ok)
+								*count = 0 // Simulate an inactive cluster
+								return nil
+							},
+						}, nil
+					},
+				}
+			},
+			lastActive: time.Now().Add(-time.Minute * 10), // Simulate inactivity
+
+			wantErr: nil,
+		},
+		{
+			name: "cluster with scale to zero enabled and inactive cluster, hibernation triggered, scheduled backup get error ignored",
+			client: func(done chan struct{}) *mockClusterClient {
+				return &mockClusterClient{
+					getClusterFunc: func(ctx context.Context, forceUpdate bool) (*cnpgv1.Cluster, error) {
+						return &cnpgv1.Cluster{
+							Status: cnpgv1.ClusterStatus{
+								Phase: healthyClusterStatus,
+							},
+							ObjectMeta: metav1.ObjectMeta{
+								Annotations: map[string]string{
+									scaleToZeroEnabledAnnotation: "true",
+									inactivityMinutesAnnotation:  "5",
+								},
+							},
+						}, nil
+					},
+					updateClusterFunc: func(ctx context.Context, cluster *cnpgv1.Cluster) error {
+						defer func() { done <- struct{}{} }()
+						require.NotNil(t, cluster)
+						require.Equal(t, "on", cluster.Annotations[hibernationAnnotation])
+						return nil
+					},
+					getClusterScheduledBackupFunc: func(ctx context.Context) (*cnpgv1.ScheduledBackup, error) {
+						return nil, errTest
+					},
+				}
+			},
+			querier: func(_ chan struct{}) *mockQuerier {
+				return &mockQuerier{
+					queryFunc: func(ctx context.Context, query string, args ...any) (postgres.Row, error) {
+						return &mockRow{
+							scanFn: func(dest ...any) error {
+								require.Len(t, dest, 1)
+								count, ok := dest[0].(*int)
+								require.True(t, ok)
+								*count = 0 // Simulate an inactive cluster
+								return nil
+							},
+						}, nil
+					},
+				}
+			},
+			lastActive: time.Now().Add(-time.Minute * 10), // Simulate inactivity
+
+			wantErr: nil,
+		},
+		{
+			name: "cluster with scale to zero enabled and inactive cluster, hibernation triggered, scheduled backup update error ignored",
+			client: func(done chan struct{}) *mockClusterClient {
+				return &mockClusterClient{
+					getClusterFunc: func(ctx context.Context, forceUpdate bool) (*cnpgv1.Cluster, error) {
+						return &cnpgv1.Cluster{
+							Status: cnpgv1.ClusterStatus{
+								Phase: healthyClusterStatus,
+							},
+							ObjectMeta: metav1.ObjectMeta{
+								Annotations: map[string]string{
+									scaleToZeroEnabledAnnotation: "true",
+									inactivityMinutesAnnotation:  "5",
+								},
+							},
+						}, nil
+					},
+					updateClusterFunc: func(ctx context.Context, cluster *cnpgv1.Cluster) error {
+						defer func() { done <- struct{}{} }()
+						require.NotNil(t, cluster)
+						require.Equal(t, "on", cluster.Annotations[hibernationAnnotation])
+						return nil
+					},
+					getClusterScheduledBackupFunc: func(ctx context.Context) (*cnpgv1.ScheduledBackup, error) {
+						return &cnpgv1.ScheduledBackup{
+							Spec: cnpgv1.ScheduledBackupSpec{
+								Cluster: cnpgv1.LocalObjectReference{
+									Name: "test-cluster",
+								},
+								Suspend: ptr.To(false),
+							},
+						}, nil
+					},
+					updateClusterScheduledBackupFunc: func(ctx context.Context, scheduledBackup *cnpgv1.ScheduledBackup) error {
+						return errTest
+					},
 				}
 			},
 			querier: func(_ chan struct{}) *mockQuerier {
@@ -159,6 +329,9 @@ func TestScaleToZero_Start(t *testing.T) {
 						require.Equal(t, "on", cluster.Annotations[hibernationAnnotation])
 						return errTest
 					},
+					getClusterScheduledBackupFunc: func(ctx context.Context) (*cnpgv1.ScheduledBackup, error) {
+						return nil, fmt.Errorf("scheduledbackups.postgresql.cnpg.io \"test-cluster\" not found")
+					},
 				}
 			},
 			querier: func(_ chan struct{}) *mockQuerier {
@@ -202,6 +375,9 @@ func TestScaleToZero_Start(t *testing.T) {
 						require.NotNil(t, cluster)
 						require.Equal(t, "on", cluster.Annotations[hibernationAnnotation])
 						return errReplicaInstance
+					},
+					getClusterScheduledBackupFunc: func(ctx context.Context) (*cnpgv1.ScheduledBackup, error) {
+						return nil, fmt.Errorf("scheduledbackups.postgresql.cnpg.io \"test-cluster\" not found")
 					},
 				}
 			},
@@ -273,6 +449,7 @@ func TestScaleToZero_Start(t *testing.T) {
 			stz := &scaleToZero{
 				client:         tc.client(doneChan),
 				currentPodName: "test-pod",
+				clusterName:    "test-cluster",
 				lastActive:     time.Now(),
 				checkInterval:  time.Millisecond * 100,
 				pgQuerier:      tc.querier(doneChan),
@@ -283,6 +460,7 @@ func TestScaleToZero_Start(t *testing.T) {
 			}
 
 			go func() {
+				defer stz.Stop(ctx)
 				err := stz.Start(ctx)
 				require.ErrorIs(t, err, tc.wantErr)
 			}()
@@ -545,6 +723,7 @@ func TestScaleToZero_isClusterActive(t *testing.T) {
 				pgQuerier:        tc.querier,
 				pgQuerierFactory: tc.querierFactory,
 				currentPodName:   "test-pod",
+				clusterName:      "test-cluster",
 				lastActive:       tc.lastActive,
 			}
 

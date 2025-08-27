@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	_ "github.com/lib/pq"
 	"github.com/xataio/cnpg-i-scale-to-zero/internal/postgres"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -24,6 +26,7 @@ type scaleToZero struct {
 	pgQuerierFactory func(ctx context.Context, url string) (postgres.Querier, error)
 
 	currentPodName string
+	clusterName    string
 
 	checkInterval time.Duration
 	lastActive    time.Time
@@ -33,6 +36,8 @@ type clusterClient interface {
 	getCluster(ctx context.Context, forceUpdate bool) (*cnpgv1.Cluster, error)
 	updateCluster(ctx context.Context, cluster *cnpgv1.Cluster) error
 	getClusterCredentials(ctx context.Context) (*postgreSQLCredentials, error)
+	getClusterScheduledBackup(ctx context.Context) (*cnpgv1.ScheduledBackup, error)
+	updateClusterScheduledBackup(ctx context.Context, scheduledBackup *cnpgv1.ScheduledBackup) error
 }
 
 type config struct {
@@ -58,6 +63,7 @@ func newScaleToZero(ctx context.Context, cfg config, client client.Client) (*sca
 	s := &scaleToZero{
 		client:         newClusterClient(client, cfg.clusterKey, defaultRefreshInterval),
 		currentPodName: cfg.podName,
+		clusterName:    cfg.clusterKey.Name,
 		checkInterval:  defaultCheckInterval,
 		pgQuerierFactory: func(ctx context.Context, url string) (postgres.Querier, error) {
 			return postgres.NewConnPool(ctx, url)
@@ -111,6 +117,13 @@ func (s *scaleToZero) Start(ctx context.Context) error {
 					if errors.Is(err, errReplicaInstance) {
 						return nil
 					}
+					// if there's an error, do not try pausing the scheduled backup
+					continue
+				}
+
+				// pause the scheduled backup if the cluster is hibernated
+				if err := s.pauseScheduledBackup(ctx); err != nil {
+					contextLogger.Error(err, "failed to pause scheduled backup")
 				}
 			}
 		}
@@ -254,4 +267,23 @@ func (s *scaleToZero) getClusterScaleToZeroConfig(ctx context.Context) (*scaleTo
 		enabled:           enabled,
 		inactivityMinutes: inactivityMinutes,
 	}, nil
+}
+
+func (s *scaleToZero) pauseScheduledBackup(ctx context.Context) error {
+	scheduledBackup, err := s.client.getClusterScheduledBackup(ctx)
+	if err != nil {
+		if strings.Contains(err.Error(), fmt.Sprintf("scheduledbackups.postgresql.cnpg.io \"%s\" not found", s.clusterName)) {
+			log.FromContext(ctx).Debug("scheduled backup not found, skipping pause")
+			return nil
+		}
+		return fmt.Errorf("failed to get scheduled backup for cluster %s: %w", s.clusterName, err)
+	}
+
+	log.FromContext(ctx).Info("pausing scheduled backup", "cluster", s.clusterName)
+	scheduledBackup.Spec.Suspend = ptr.To(true)
+	if err := s.client.updateClusterScheduledBackup(ctx, scheduledBackup); err != nil {
+		return fmt.Errorf("failed to update scheduled backup for cluster %s: %w", s.clusterName, err)
+	}
+
+	return nil
 }
