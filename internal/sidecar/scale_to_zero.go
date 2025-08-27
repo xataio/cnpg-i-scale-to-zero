@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
@@ -13,6 +12,7 @@ import (
 	"github.com/cloudnative-pg/machinery/pkg/log"
 	_ "github.com/lib/pq"
 	"github.com/xataio/cnpg-i-scale-to-zero/internal/postgres"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -117,7 +117,7 @@ func (s *scaleToZero) Start(ctx context.Context) error {
 					if errors.Is(err, errReplicaInstance) {
 						return nil
 					}
-					// if there's an error, do not try pausing the scheduled backup
+					// if hibernation fails, do not try pausing the scheduled backup
 					continue
 				}
 
@@ -272,10 +272,11 @@ func (s *scaleToZero) getClusterScaleToZeroConfig(ctx context.Context) (*scaleTo
 func (s *scaleToZero) pauseScheduledBackup(ctx context.Context) error {
 	scheduledBackup, err := s.client.getClusterScheduledBackup(ctx)
 	if err != nil {
-		if strings.Contains(err.Error(), fmt.Sprintf("scheduledbackups.postgresql.cnpg.io \"%s\" not found", s.clusterName)) {
+		if apierrors.IsNotFound(err) {
 			log.FromContext(ctx).Debug("scheduled backup not found, skipping pause")
 			return nil
 		}
+
 		return fmt.Errorf("failed to get scheduled backup for cluster %s: %w", s.clusterName, err)
 	}
 
