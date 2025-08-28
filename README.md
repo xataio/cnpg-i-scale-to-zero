@@ -11,7 +11,8 @@ This plugin monitors PostgreSQL database activity and automatically scales clust
 1. **Sidecar Injection**: Automatically adds a monitoring sidecar to the primary PostgreSQL pod
 2. **Activity Monitoring**: The sidecar periodically checks for active database connections and recent queries
 3. **Automatic Hibernation**: When the cluster is inactive for the configured duration, it sets the hibernation annotation
-4. **Resource Optimization**: Inactive clusters are scaled to zero, freeing up cluster resources
+4. **Scheduled Backup Management**: Automatically pauses scheduled backups when the cluster is hibernated to prevent backup failures
+5. **Resource Optimization**: Inactive clusters are scaled to zero, freeing up cluster resources
 
 ## Installation
 
@@ -78,13 +79,13 @@ The plugin behavior is configured through cluster annotations:
 - `xata.io/scale-to-zero-enabled`: Set to `"true"` to enable scale-to-zero functionality
 - `xata.io/scale-to-zero-inactivity-minutes`: Sets the inactivity threshold in minutes before hibernation (default: 30 minutes)
 
-The plugin automatically manages the `cnpg.io/hibernation` annotation to trigger cluster hibernation.
+The plugin automatically manages the `cnpg.io/hibernation` annotation to trigger cluster hibernation and pauses any associated scheduled backups to prevent backup failures on hibernated clusters.
 
 See the [cluster example](doc/examples/cluster-example.yaml) for a complete configuration.
 
 #### RBAC
 
-**Important**: Each cluster that uses scale-to-zero functionality requires specific RBAC permissions for the sidecar to update cluster resources.
+**Important**: Each cluster that uses scale-to-zero functionality requires specific RBAC permissions for the sidecar to update cluster resources and manage scheduled backups.
 
 Create the required RBAC using the template:
 
@@ -177,6 +178,7 @@ The plugin provides logging to help monitor its operation:
 - Sidecar injection events are logged during pod creation
 - Activity monitoring status is logged at each check interval
 - Hibernation events are logged when clusters are scaled down
+- Scheduled backup pause operations are logged
 
 You can view the plugin logs using:
 

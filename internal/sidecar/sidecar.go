@@ -82,7 +82,9 @@ func generateScheme(ctx context.Context) *runtime.Scheme {
 	// Proceed with custom registration of the CNPG scheme
 	schemeGroupVersion := schema.GroupVersion{Group: cnpgGroup, Version: cnpgVersion}
 	schemeBuilder := &scheme.Builder{GroupVersion: schemeGroupVersion}
-	schemeBuilder.Register(&cnpgv1.Cluster{}, &cnpgv1.ClusterList{})
+	schemeBuilder.Register(
+		&cnpgv1.Cluster{}, &cnpgv1.ClusterList{},
+		&cnpgv1.ScheduledBackup{}, &cnpgv1.ScheduledBackupList{})
 	utilruntime.Must(schemeBuilder.AddToScheme(result))
 
 	schemeLog := log.FromContext(ctx)

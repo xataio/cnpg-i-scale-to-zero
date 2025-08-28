@@ -126,6 +126,18 @@ func (r *cnpgClusterClient) getClusterCredentials(ctx context.Context) (*postgre
 	return creds, nil
 }
 
+func (r *cnpgClusterClient) getClusterScheduledBackup(ctx context.Context) (*cnpgv1.ScheduledBackup, error) {
+	scheduledBackup := &cnpgv1.ScheduledBackup{}
+	if err := r.client.Get(ctx, r.clusterKey, scheduledBackup); err != nil {
+		return nil, err
+	}
+	return scheduledBackup, nil
+}
+
+func (r *cnpgClusterClient) updateClusterScheduledBackup(ctx context.Context, scheduledBackup *cnpgv1.ScheduledBackup) error {
+	return r.client.Update(ctx, scheduledBackup)
+}
+
 func (p *postgreSQLCredentials) connString() string {
 	return fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=require",
 		p.host, p.port, p.username, p.password, p.database)

@@ -89,6 +89,7 @@ The scale-to-zero plugin specifically:
 - Monitors Pod creation events
 - Injects a sidecar container into the primary PostgreSQL pod only
 - The sidecar monitors database activity and hibernates inactive clusters
+- Manages scheduled backups by pausing them during hibernation
 
 ### Sidecar Implementation
 
@@ -115,6 +116,8 @@ inactive clusters:
 - **Configurable Inactivity Threshold**: Uses the `xata.io/scale-to-zero-inactivity-minutes`
   annotation to determine when a cluster should be hibernated (defaults to 30 minutes)
 - **Hibernation**: Sets the `cnpg.io/hibernation` annotation to scale the cluster to zero
+- **Scheduled Backup Management**: Automatically pauses scheduled backups when hibernating
+  clusters to prevent backup failures on inactive clusters
 - **Primary-Only Operation**: Only runs on the primary PostgreSQL instance
 
 Key features:
@@ -123,6 +126,7 @@ Key features:
 - PostgreSQL connection pooling for activity monitoring
 - Graceful shutdown on context cancellation
 - Error handling for replica instances (stops monitoring if not primary)
+- Automatic scheduled backup pause operations
 
 #### Environment Variables
 
@@ -171,6 +175,10 @@ are inactive for a specified period. Here's how it operates:
    the sidecar sets the `cnpg.io/hibernation` annotation on the cluster, causing
    CloudNativePG to scale it down to zero replicas.
 
+5. **Scheduled Backup Management**: After hibernating a cluster, the sidecar automatically
+   pauses any associated scheduled backups to prevent backup operations from failing
+   on hibernated clusters.
+
 ### Configuration
 
 The plugin behavior can be configured through cluster annotations:
@@ -188,7 +196,7 @@ The injected sidecar container is configurable and uses environment-based config
 - **Configurable via**: `SIDECAR_IMAGE` environment variable or `--sidecar-image` flag
 - Environment variables for cluster identification
 - Direct access to the PostgreSQL database
-- Kubernetes API access for cluster management
+- Kubernetes API access for cluster and scheduled backup management
 - Configurable check intervals and inactivity thresholds
 
 ## Build and deploy the plugin
