@@ -35,6 +35,8 @@ func Start(ctx context.Context) error {
 			DisableFor: []client.Object{
 				&corev1.Secret{},
 				&cnpgv1.Cluster{},
+				&cnpgv1.ScheduledBackup{},
+				&cnpgv1.Backup{},
 			},
 		},
 	}
@@ -84,7 +86,8 @@ func generateScheme(ctx context.Context) *runtime.Scheme {
 	schemeBuilder := &scheme.Builder{GroupVersion: schemeGroupVersion}
 	schemeBuilder.Register(
 		&cnpgv1.Cluster{}, &cnpgv1.ClusterList{},
-		&cnpgv1.ScheduledBackup{}, &cnpgv1.ScheduledBackupList{})
+		&cnpgv1.ScheduledBackup{}, &cnpgv1.ScheduledBackupList{},
+		&cnpgv1.Backup{}, &cnpgv1.BackupList{})
 	utilruntime.Must(schemeBuilder.AddToScheme(result))
 
 	schemeLog := log.FromContext(ctx)

@@ -138,6 +138,19 @@ func (r *cnpgClusterClient) updateClusterScheduledBackup(ctx context.Context, sc
 	return r.client.Update(ctx, scheduledBackup)
 }
 
+func (r *cnpgClusterClient) getClusterBackups(ctx context.Context) ([]cnpgv1.Backup, error) {
+	// Use label selector to filter backups for this cluster
+	listOptions := []client.ListOption{
+		client.InNamespace(r.clusterKey.Namespace),
+		client.MatchingLabels{"cnpg.io/cluster": r.clusterKey.Name},
+	}
+	var backupList cnpgv1.BackupList
+	if err := r.client.List(ctx, &backupList, listOptions...); err != nil {
+		return nil, err
+	}
+	return backupList.Items, nil
+}
+
 func (p *postgreSQLCredentials) connString() string {
 	return fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=require",
 		p.host, p.port, p.username, p.password, p.database)

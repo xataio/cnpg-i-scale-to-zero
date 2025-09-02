@@ -38,6 +38,7 @@ type clusterClient interface {
 	getClusterCredentials(ctx context.Context) (*postgreSQLCredentials, error)
 	getClusterScheduledBackup(ctx context.Context) (*cnpgv1.ScheduledBackup, error)
 	updateClusterScheduledBackup(ctx context.Context, scheduledBackup *cnpgv1.ScheduledBackup) error
+	getClusterBackups(ctx context.Context) ([]cnpgv1.Backup, error)
 }
 
 type config struct {
@@ -122,7 +123,14 @@ func (s *scaleToZero) Start(ctx context.Context) error {
 				continue
 			}
 
-			if !isActive {
+			// if we can't determine if there's a backup in progress, we don't
+			// error, and assume there aren't any
+			isBackupInProgress, err := s.isBackupInProgress(ctx)
+			if err != nil {
+				contextLogger.Error(err, "failed to check backup status")
+			}
+
+			if !isActive && !isBackupInProgress {
 				if err := s.hibernate(ctx); err != nil {
 					contextLogger.Error(err, "hibernation failed")
 					// we stop the scale to zero sidecar if this is not the primary instance
@@ -301,4 +309,23 @@ func (s *scaleToZero) pauseScheduledBackup(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (s *scaleToZero) isBackupInProgress(ctx context.Context) (bool, error) {
+	backups, err := s.client.getClusterBackups(ctx)
+	if err != nil {
+		return false, fmt.Errorf("failed to get cluster backups: %w", err)
+	}
+
+	log.FromContext(ctx).Debug("checking backups for in-progress status", "count", len(backups))
+
+	for _, backup := range backups {
+		log.FromContext(ctx).Debug("backup status", "cluster", s.clusterName, "backup", backup.Name, "status", backup.Status.Phase)
+		if backup.Status.Phase == cnpgv1.BackupPhaseRunning {
+			log.FromContext(ctx).Info("backup is in progress", "cluster", s.clusterName, "backup", backup.Name)
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
