@@ -4,15 +4,15 @@ A [CNPG-I](https://github.com/cloudnative-pg/cnpg-i) plugin that automatically h
 
 ## Overview
 
-This plugin monitors PostgreSQL database activity and automatically scales clusters down to zero replicas when they've been inactive for a configurable period. It injects a monitoring sidecar into the primary PostgreSQL pod that tracks database connections and query activity, then hibernates the cluster by setting the `cnpg.io/hibernation` annotation when the inactivity threshold is reached.
+This plugin monitors PostgreSQL database activity and automatically scales clusters down to zero replicas when they've been inactive for a configurable period. It injects a monitoring sidecar into all pods of the PostgreSQL cluster, tracking database connections and query activity, with only the primary hibernating the cluster by setting the `cnpg.io/hibernation` annotation when the inactivity threshold is reached.
 
 ### How It Works
 
-1. **Sidecar Injection**: Automatically adds a monitoring sidecar to the primary PostgreSQL pod
-2. **Activity Monitoring**: The sidecar periodically checks for active database connections and recent queries
-3. **Automatic Hibernation**: When the cluster is inactive for the configured duration, it sets the hibernation annotation
-4. **Scheduled Backup Management**: Automatically pauses scheduled backups when the cluster is hibernated to prevent backup failures
-5. **Resource Optimization**: Inactive clusters are scaled to zero, freeing up cluster resources
+1. **Sidecar Injection**: Automatically adds a monitoring sidecar to all PostgreSQL pods
+2. **Activity Monitoring**: All sidecars periodically check for open database connections (including idle and active)
+3. **Automatic Hibernation**: When the cluster is inactive for the configured duration, the primary pod sets the hibernation annotation
+4. **Scheduled Backup Management**: The primary pod automatically pauses scheduled backups when the cluster is hibernated to prevent backup failures
+5. **Switchover Handling**: During switchovers, the new primary automatically takes over hibernation duties
 
 ## Installation
 
