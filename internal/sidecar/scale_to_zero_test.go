@@ -36,7 +36,11 @@ func TestScaleToZero_Start(t *testing.T) {
 				return &mockClusterClient{
 					getClusterFunc: func(ctx context.Context, forceUpdate bool) (*cnpgv1.Cluster, error) {
 						defer func() { done <- struct{}{} }()
-						return &cnpgv1.Cluster{}, nil
+						return &cnpgv1.Cluster{
+							Status: cnpgv1.ClusterStatus{
+								CurrentPrimary: "test-pod-1",
+							},
+						}, nil
 					},
 				}
 			},
@@ -67,7 +71,8 @@ func TestScaleToZero_Start(t *testing.T) {
 					getClusterFunc: func(ctx context.Context, forceUpdate bool) (*cnpgv1.Cluster, error) {
 						return &cnpgv1.Cluster{
 							Status: cnpgv1.ClusterStatus{
-								Phase: healthyClusterStatus,
+								Phase:          healthyClusterStatus,
+								CurrentPrimary: "test-pod-1",
 							},
 							ObjectMeta: metav1.ObjectMeta{
 								Annotations: map[string]string{
@@ -103,7 +108,8 @@ func TestScaleToZero_Start(t *testing.T) {
 					getClusterFunc: func(ctx context.Context, forceUpdate bool) (*cnpgv1.Cluster, error) {
 						return &cnpgv1.Cluster{
 							Status: cnpgv1.ClusterStatus{
-								Phase: healthyClusterStatus,
+								Phase:          healthyClusterStatus,
+								CurrentPrimary: "test-pod-1",
 							},
 							ObjectMeta: metav1.ObjectMeta{
 								Annotations: map[string]string{
@@ -144,13 +150,102 @@ func TestScaleToZero_Start(t *testing.T) {
 			wantErr: nil,
 		},
 		{
+			name: "cluster with scale to zero enabled and inactive cluster, current primary unknown, hibernation triggered",
+			client: func(done chan struct{}) *mockClusterClient {
+				return &mockClusterClient{
+					getClusterFunc: func(ctx context.Context, forceUpdate bool) (*cnpgv1.Cluster, error) {
+						return &cnpgv1.Cluster{
+							Status: cnpgv1.ClusterStatus{
+								Phase:          healthyClusterStatus,
+								CurrentPrimary: "",
+							},
+							ObjectMeta: metav1.ObjectMeta{
+								Annotations: map[string]string{
+									scaleToZeroEnabledAnnotation: "true",
+									inactivityMinutesAnnotation:  "5",
+								},
+							},
+						}, nil
+					},
+					updateClusterFunc: func(ctx context.Context, cluster *cnpgv1.Cluster) error {
+						defer func() { done <- struct{}{} }()
+						require.NotNil(t, cluster)
+						require.Equal(t, "on", cluster.Annotations[hibernationAnnotation])
+						return nil
+					},
+					getClusterScheduledBackupFunc: func(ctx context.Context) (*cnpgv1.ScheduledBackup, error) {
+						return nil, fmt.Errorf("scheduledbackups.postgresql.cnpg.io \"test-cluster\" not found")
+					},
+				}
+			},
+			querier: func(_ chan struct{}) *mockQuerier {
+				return &mockQuerier{
+					queryFunc: func(ctx context.Context, query string, args ...any) (postgres.Row, error) {
+						return &mockRow{
+							scanFn: func(dest ...any) error {
+								require.Len(t, dest, 1)
+								count, ok := dest[0].(*int)
+								require.True(t, ok)
+								*count = 0 // Simulate an inactive cluster
+								return nil
+							},
+						}, nil
+					},
+				}
+			},
+			lastActive: time.Now().Add(-time.Minute * 10), // Simulate inactivity
+
+			wantErr: nil,
+		},
+		{
+			name: "cluster with scale to zero enabled and inactive cluster, non primary pod, no hibernation triggered",
+			client: func(done chan struct{}) *mockClusterClient {
+				return &mockClusterClient{
+					getClusterFunc: func(ctx context.Context, forceUpdate bool) (*cnpgv1.Cluster, error) {
+						defer func() { done <- struct{}{} }()
+						return &cnpgv1.Cluster{
+							Status: cnpgv1.ClusterStatus{
+								Phase:          healthyClusterStatus,
+								CurrentPrimary: "test-pod-2",
+							},
+							ObjectMeta: metav1.ObjectMeta{
+								Annotations: map[string]string{
+									scaleToZeroEnabledAnnotation: "true",
+									inactivityMinutesAnnotation:  "5",
+								},
+							},
+						}, nil
+					},
+				}
+			},
+			querier: func(_ chan struct{}) *mockQuerier {
+				return &mockQuerier{
+					queryFunc: func(ctx context.Context, query string, args ...any) (postgres.Row, error) {
+						return &mockRow{
+							scanFn: func(dest ...any) error {
+								require.Len(t, dest, 1)
+								count, ok := dest[0].(*int)
+								require.True(t, ok)
+								*count = 0 // Simulate an inactive cluster
+								return nil
+							},
+						}, nil
+					},
+				}
+			},
+			lastActive: time.Now().Add(-time.Minute * 10), // Simulate inactivity
+
+			wantErr: nil,
+		},
+		{
 			name: "cluster with scale to zero enabled and inactive cluster, hibernation triggered and scheduled backup paused",
 			client: func(done chan struct{}) *mockClusterClient {
 				return &mockClusterClient{
 					getClusterFunc: func(ctx context.Context, forceUpdate bool) (*cnpgv1.Cluster, error) {
 						return &cnpgv1.Cluster{
 							Status: cnpgv1.ClusterStatus{
-								Phase: healthyClusterStatus,
+								Phase:          healthyClusterStatus,
+								CurrentPrimary: "test-pod-1",
 							},
 							ObjectMeta: metav1.ObjectMeta{
 								Annotations: map[string]string{
@@ -211,7 +306,8 @@ func TestScaleToZero_Start(t *testing.T) {
 					getClusterFunc: func(ctx context.Context, forceUpdate bool) (*cnpgv1.Cluster, error) {
 						return &cnpgv1.Cluster{
 							Status: cnpgv1.ClusterStatus{
-								Phase: healthyClusterStatus,
+								Phase:          healthyClusterStatus,
+								CurrentPrimary: "test-pod-1",
 							},
 							ObjectMeta: metav1.ObjectMeta{
 								Annotations: map[string]string{
@@ -258,7 +354,8 @@ func TestScaleToZero_Start(t *testing.T) {
 					getClusterFunc: func(ctx context.Context, forceUpdate bool) (*cnpgv1.Cluster, error) {
 						return &cnpgv1.Cluster{
 							Status: cnpgv1.ClusterStatus{
-								Phase: healthyClusterStatus,
+								Phase:          healthyClusterStatus,
+								CurrentPrimary: "test-pod-1",
 							},
 							ObjectMeta: metav1.ObjectMeta{
 								Annotations: map[string]string{
@@ -315,7 +412,8 @@ func TestScaleToZero_Start(t *testing.T) {
 					getClusterFunc: func(ctx context.Context, forceUpdate bool) (*cnpgv1.Cluster, error) {
 						return &cnpgv1.Cluster{
 							Status: cnpgv1.ClusterStatus{
-								Phase: healthyClusterStatus,
+								Phase:          healthyClusterStatus,
+								CurrentPrimary: "test-pod-1",
 							},
 							ObjectMeta: metav1.ObjectMeta{
 								Annotations: map[string]string{
@@ -362,7 +460,8 @@ func TestScaleToZero_Start(t *testing.T) {
 					getClusterFunc: func(ctx context.Context, forceUpdate bool) (*cnpgv1.Cluster, error) {
 						return &cnpgv1.Cluster{
 							Status: cnpgv1.ClusterStatus{
-								Phase: healthyClusterStatus,
+								Phase:          healthyClusterStatus,
+								CurrentPrimary: "test-pod-1",
 							},
 							ObjectMeta: metav1.ObjectMeta{
 								Annotations: map[string]string{
@@ -409,7 +508,8 @@ func TestScaleToZero_Start(t *testing.T) {
 					getClusterFunc: func(ctx context.Context, forceUpdate bool) (*cnpgv1.Cluster, error) {
 						return &cnpgv1.Cluster{
 							Status: cnpgv1.ClusterStatus{
-								Phase: healthyClusterStatus,
+								Phase:          healthyClusterStatus,
+								CurrentPrimary: "test-pod-1",
 							},
 							ObjectMeta: metav1.ObjectMeta{
 								Annotations: map[string]string{
@@ -450,7 +550,7 @@ func TestScaleToZero_Start(t *testing.T) {
 
 			stz := &scaleToZero{
 				client:         tc.client(doneChan),
-				currentPodName: "test-pod",
+				currentPodName: "test-pod-1",
 				clusterName:    "test-cluster",
 				lastActive:     time.Now(),
 				checkInterval:  time.Millisecond * 100,
@@ -893,100 +993,67 @@ func Test_hibernate(t *testing.T) {
 func TestScaleToZero_getScaleToZeroConfig(t *testing.T) {
 	t.Parallel()
 
-	errTest := errors.New("oh noes")
-
 	tests := []struct {
-		name   string
-		client *mockClusterClient
+		name    string
+		cluster *cnpgv1.Cluster
 
 		wantCfg *scaleToZeroConfig
-		wantErr error
 	}{
 		{
 			name: "scale to zero enabled with valid inactivity minutes",
-			client: &mockClusterClient{
-				getClusterFunc: func(ctx context.Context, forceUpdate bool) (*cnpgv1.Cluster, error) {
-					return &cnpgv1.Cluster{
-						ObjectMeta: metav1.ObjectMeta{
-							Annotations: map[string]string{
-								scaleToZeroEnabledAnnotation: "true",
-								inactivityMinutesAnnotation:  "10",
-							},
-						},
-					}, nil
+			cluster: &cnpgv1.Cluster{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						scaleToZeroEnabledAnnotation: "true",
+						inactivityMinutesAnnotation:  "10",
+					},
 				},
 			},
 			wantCfg: &scaleToZeroConfig{
 				enabled:           true,
 				inactivityMinutes: 10,
 			},
-			wantErr: nil,
 		},
 		{
 			name: "scale to zero enabled with invalid inactivity minutes uses default",
-			client: &mockClusterClient{
-				getClusterFunc: func(ctx context.Context, forceUpdate bool) (*cnpgv1.Cluster, error) {
-					return &cnpgv1.Cluster{
-						ObjectMeta: metav1.ObjectMeta{
-							Annotations: map[string]string{
-								scaleToZeroEnabledAnnotation: "true",
-								inactivityMinutesAnnotation:  "notanumber",
-							},
-						},
-					}, nil
+			cluster: &cnpgv1.Cluster{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						scaleToZeroEnabledAnnotation: "true",
+						inactivityMinutesAnnotation:  "notanumber",
+					},
 				},
 			},
 			wantCfg: &scaleToZeroConfig{
 				enabled:           true,
 				inactivityMinutes: defaultInactivityMinutes,
 			},
-			wantErr: nil,
 		},
 		{
 			name: "no scale to zero annotations, uses default values",
-			client: &mockClusterClient{
-				getClusterFunc: func(ctx context.Context, forceUpdate bool) (*cnpgv1.Cluster, error) {
-					return &cnpgv1.Cluster{
-						ObjectMeta: metav1.ObjectMeta{
-							Annotations: map[string]string{},
-						},
-					}, nil
+			cluster: &cnpgv1.Cluster{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{},
 				},
 			},
 			wantCfg: &scaleToZeroConfig{
 				enabled:           false,
 				inactivityMinutes: defaultInactivityMinutes,
 			},
-			wantErr: nil,
 		},
 		{
 			name: "scale to zero enabled, no inactivity annotation, uses default inactivity minutes",
-			client: &mockClusterClient{
-				getClusterFunc: func(ctx context.Context, forceUpdate bool) (*cnpgv1.Cluster, error) {
-					return &cnpgv1.Cluster{
-						ObjectMeta: metav1.ObjectMeta{
-							Annotations: map[string]string{
-								scaleToZeroEnabledAnnotation: "true",
-							},
-						},
-					}, nil
+			cluster: &cnpgv1.Cluster{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						scaleToZeroEnabledAnnotation: "true",
+					},
 				},
 			},
 			wantCfg: &scaleToZeroConfig{
 				enabled:           true,
 				inactivityMinutes: defaultInactivityMinutes,
 			},
-			wantErr: nil,
-		},
-		{
-			name: "getCluster returns error",
-			client: &mockClusterClient{
-				getClusterFunc: func(ctx context.Context, forceUpdate bool) (*cnpgv1.Cluster, error) {
-					return nil, errTest
-				},
-			},
-			wantCfg: nil,
-			wantErr: errTest,
 		},
 	}
 
@@ -994,11 +1061,8 @@ func TestScaleToZero_getScaleToZeroConfig(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			stz := &scaleToZero{
-				client: tc.client,
-			}
-			cfg, err := stz.getClusterScaleToZeroConfig(context.Background())
-			require.ErrorIs(t, err, tc.wantErr)
+			stz := &scaleToZero{}
+			cfg := stz.getClusterScaleToZeroConfig(context.Background(), tc.cluster)
 			require.Equal(t, tc.wantCfg, cfg)
 		})
 	}
