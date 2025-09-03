@@ -101,11 +101,6 @@ func (impl Implementation) reconcileMetadata(
 		return nil, err
 	}
 
-	if cluster.Status.CurrentPrimary != "" && pod.Name != cluster.Status.CurrentPrimary {
-		logger.Info("pod is not the current primary, skipping sidecar injection", "pod", pod.Name, "primary", cluster.Status.CurrentPrimary)
-		return &lifecycle.OperatorLifecycleResponse{}, nil
-	}
-
 	mutatedPod := pod.DeepCopy()
 
 	sidecarContainer := &corev1.Container{
