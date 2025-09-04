@@ -87,8 +87,9 @@ The `OperatorLifecycleServer` interface requires several methods:
 The scale-to-zero plugin specifically:
 
 - Monitors Pod creation events
-- Injects a sidecar container into the primary PostgreSQL pod only
-- The sidecar monitors database activity and hibernates inactive clusters
+- Injects a sidecar container into all PostgreSQL cluster pods
+- The sidecar on the primary monitors database activity and hibernates inactive clusters
+- The sidecar on the replicas remains passive until they are promoted to primary
 - Manages scheduled backups by pausing them during hibernation
 
 ### Sidecar Implementation
@@ -122,8 +123,8 @@ Key features:
 - Periodic checks at configurable intervals (default: 1 minute)
 - PostgreSQL connection pooling for activity monitoring
 - Graceful shutdown on context cancellation
-- Error handling for replica instances (stops monitoring if not primary)
 - Automatic scheduled backup pause operations
+- Switchover support
 
 #### Environment Variables
 

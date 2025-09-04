@@ -198,7 +198,7 @@ func TestScaleToZero_Start(t *testing.T) {
 			wantErr: nil,
 		},
 		{
-			name: "cluster with scale to zero enabled and inactive cluster, non primary pod, no hibernation triggered",
+			name: "cluster with scale to zero enabled and inactive cluster, non primary pod, no checks or hibernation triggered",
 			client: func(done chan struct{}) *mockClusterClient {
 				return &mockClusterClient{
 					getClusterFunc: func(ctx context.Context, forceUpdate bool) (*cnpgv1.Cluster, error) {
@@ -218,22 +218,9 @@ func TestScaleToZero_Start(t *testing.T) {
 					},
 				}
 			},
-			querier: func(_ chan struct{}) *mockQuerier {
-				return &mockQuerier{
-					queryFunc: func(ctx context.Context, query string, args ...any) (postgres.Row, error) {
-						return &mockRow{
-							scanFn: func(dest ...any) error {
-								require.Len(t, dest, 1)
-								count, ok := dest[0].(*int)
-								require.True(t, ok)
-								*count = 0 // Simulate an inactive cluster
-								return nil
-							},
-						}, nil
-					},
-				}
+			querier: func(done chan struct{}) *mockQuerier {
+				return &mockQuerier{}
 			},
-			lastActive: time.Now().Add(-time.Minute * 10), // Simulate inactivity
 
 			wantErr: nil,
 		},

@@ -96,6 +96,15 @@ func (s *scaleToZero) Start(ctx context.Context) error {
 				continue
 			}
 
+			// only the primary keeps track of activity and hibernation
+			if !s.isPrimary(cluster) {
+				// reset last active time when it's not the primary to make sure
+				// when there's a switchover, the new primary has a clean state
+				s.lastActive = time.Time{}
+				contextLogger.Info("running on non-primary pod, skipping activity monitoring", "primary", cluster.Status.CurrentPrimary)
+				continue
+			}
+
 			scaleToZeroConfig := s.getClusterScaleToZeroConfig(ctx, cluster)
 
 			if !scaleToZeroConfig.enabled {
@@ -113,13 +122,6 @@ func (s *scaleToZero) Start(ctx context.Context) error {
 				continue
 			}
 
-			// all pods keep track of activity, but only the primary needs to hibernate
-			if !s.isPrimary(cluster) {
-				contextLogger.Info("sidecar running on non-primary pod, skipping hibernation checks", "primary", cluster.Status.CurrentPrimary)
-				continue
-			}
-
-			// only the primary hibernates
 			if !isActive {
 				if err := s.hibernate(ctx); err != nil {
 					contextLogger.Error(err, "hibernation failed")
