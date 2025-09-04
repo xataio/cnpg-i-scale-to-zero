@@ -87,8 +87,9 @@ The `OperatorLifecycleServer` interface requires several methods:
 The scale-to-zero plugin specifically:
 
 - Monitors Pod creation events
-- Injects a sidecar container into the primary PostgreSQL pod only
-- The sidecar monitors database activity and hibernates inactive clusters
+- Injects a sidecar container into all PostgreSQL cluster pods
+- The sidecar on the primary monitors database activity and hibernates inactive clusters
+- The sidecar on the replicas remains passive until they are promoted to primary
 - Manages scheduled backups by pausing them during hibernation
 
 ### Sidecar Implementation
@@ -108,25 +109,22 @@ The sidecar manager handles the startup and configuration of the sidecar process
 
 #### Scale-to-Zero Logic (`scale_to_zero.go`)
 
-The main scale-to-zero functionality monitors database activity and hibernates
-inactive clusters:
+The main scale-to-zero functionality monitors database activity and hibernates inactive clusters:
 
-- **Activity Monitoring**: Connects to PostgreSQL to check for active connections
-  and recent query activity
+- **Activity Monitoring**: Connects to PostgreSQL to check for open connections
+- **Switchover Handling**: Automatically detects primary changes and transfers monitoring responsibility
 - **Configurable Inactivity Threshold**: Uses the `xata.io/scale-to-zero-inactivity-minutes`
   annotation to determine when a cluster should be hibernated (defaults to 30 minutes)
 - **Hibernation**: Sets the `cnpg.io/hibernation` annotation to scale the cluster to zero
-- **Scheduled Backup Management**: Automatically pauses scheduled backups when hibernating
-  clusters to prevent backup failures on inactive clusters
-- **Primary-Only Operation**: Only runs on the primary PostgreSQL instance
+- **Scheduled Backup Management**: Automatically pauses scheduled backups when hibernating clusters to prevent backup failures on inactive clusters
 
 Key features:
 
 - Periodic checks at configurable intervals (default: 1 minute)
 - PostgreSQL connection pooling for activity monitoring
 - Graceful shutdown on context cancellation
-- Error handling for replica instances (stops monitoring if not primary)
 - Automatic scheduled backup pause operations
+- Switchover support
 
 #### Environment Variables
 
@@ -166,16 +164,13 @@ are inactive for a specified period. Here's how it operates:
 1. **Sidecar Injection**: When a PostgreSQL pod is created, the plugin injects a
    sidecar container that monitors database activity.
 
-2. **Primary Pod Only**: The sidecar only runs monitoring on the primary PostgreSQL
-   instance to avoid conflicts and ensure consistent behavior.
+2. **Activity Monitoring**: The sidecar periodically connects to PostgreSQL to check open database connections.
 
-3. **Activity Monitoring**: The sidecar periodically connects to PostgreSQL to check open database connections.
-
-4. **Hibernation**: When the cluster has been inactive for the configured duration,
-   the sidecar sets the `cnpg.io/hibernation` annotation on the cluster, causing
+3. **Hibernation**: When the cluster has been inactive for the configured duration,
+   the primary sidecar sets the `cnpg.io/hibernation` annotation on the cluster, causing
    CloudNativePG to scale it down to zero replicas.
 
-5. **Scheduled Backup Management**: After hibernating a cluster, the sidecar automatically
+4. **Scheduled Backup Management**: After hibernating a cluster, the sidecar automatically
    pauses any associated scheduled backups to prevent backup operations from failing
    on hibernated clusters.
 

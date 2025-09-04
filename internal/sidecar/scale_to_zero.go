@@ -90,11 +90,22 @@ func (s *scaleToZero) Start(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			scaleToZeroConfig, err := s.getClusterScaleToZeroConfig(ctx)
+			cluster, err := s.client.getCluster(ctx, doNotForceUpdate)
 			if err != nil {
-				contextLogger.Error(err, "failed to get scale to zero configuration")
+				contextLogger.Error(err, "failed to get cluster")
 				continue
 			}
+
+			// only the primary keeps track of activity and hibernation
+			if !s.isPrimary(cluster) {
+				// reset last active time when it's not the primary to make sure
+				// when there's a switchover, the new primary has a clean state
+				s.lastActive = time.Time{}
+				contextLogger.Info("running on non-primary pod, skipping activity monitoring", "primary", cluster.Status.CurrentPrimary)
+				continue
+			}
+
+			scaleToZeroConfig := s.getClusterScaleToZeroConfig(ctx, cluster)
 
 			if !scaleToZeroConfig.enabled {
 				// reset last active time if scale to zero is disabled. This
@@ -110,6 +121,7 @@ func (s *scaleToZero) Start(ctx context.Context) error {
 				contextLogger.Error(err, "failed to check cluster activity")
 				continue
 			}
+
 			if !isActive {
 				if err := s.hibernate(ctx); err != nil {
 					contextLogger.Error(err, "hibernation failed")
@@ -152,6 +164,13 @@ func (s *scaleToZero) initQuerier(ctx context.Context) error {
 
 	s.pgQuerier, err = s.pgQuerierFactory(ctx, credentials.connString())
 	return err
+}
+
+func (s *scaleToZero) isPrimary(cluster *cnpgv1.Cluster) bool {
+	// when the cluster is first initialised, the current primary might not be
+	// set yet. Assume it's the primary if it's not set to avoid blocking the
+	// scale to zero checks.
+	return cluster.Status.CurrentPrimary == "" || (cluster.Status.CurrentPrimary == s.currentPodName)
 }
 
 // isClusterActive checks if the cluster has any open connections.
@@ -241,12 +260,7 @@ func (s *scaleToZero) hibernate(ctx context.Context) error {
 // getClusterScaleToZeroConfig retrieves the scale to zero configuration from
 // the cluster annotations. It returns the enabled status and inactivity
 // minutes. If the annotation is not set, it uses default values.
-func (s *scaleToZero) getClusterScaleToZeroConfig(ctx context.Context) (*scaleToZeroConfig, error) {
-	cluster, err := s.client.getCluster(ctx, doNotForceUpdate)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get cluster: %w", err)
-	}
-
+func (s *scaleToZero) getClusterScaleToZeroConfig(ctx context.Context, cluster *cnpgv1.Cluster) *scaleToZeroConfig {
 	enabled := false
 	inactivityMinutes := defaultInactivityMinutes
 
@@ -266,7 +280,7 @@ func (s *scaleToZero) getClusterScaleToZeroConfig(ctx context.Context) (*scaleTo
 	return &scaleToZeroConfig{
 		enabled:           enabled,
 		inactivityMinutes: inactivityMinutes,
-	}, nil
+	}
 }
 
 func (s *scaleToZero) pauseScheduledBackup(ctx context.Context) error {

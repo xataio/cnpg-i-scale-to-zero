@@ -4,15 +4,16 @@ A [CNPG-I](https://github.com/cloudnative-pg/cnpg-i) plugin that automatically h
 
 ## Overview
 
-This plugin monitors PostgreSQL database activity and automatically scales clusters down to zero replicas when they've been inactive for a configurable period. It injects a monitoring sidecar into the primary PostgreSQL pod that tracks database connections and query activity, then hibernates the cluster by setting the `cnpg.io/hibernation` annotation when the inactivity threshold is reached.
+This plugin monitors PostgreSQL database activity and automatically scales clusters down to zero replicas when they've been inactive for a configurable period. It injects a monitoring sidecar into all pods of the PostgreSQL cluster. Only the primary pod actively monitors database connections and manages hibernation, while replica pods run the sidecar in passive mode until promoted to primary.
 
 ### How It Works
 
-1. **Sidecar Injection**: Automatically adds a monitoring sidecar to the primary PostgreSQL pod
-2. **Activity Monitoring**: The sidecar periodically checks for active database connections and recent queries
-3. **Automatic Hibernation**: When the cluster is inactive for the configured duration, it sets the hibernation annotation
-4. **Scheduled Backup Management**: Automatically pauses scheduled backups when the cluster is hibernated to prevent backup failures
-5. **Resource Optimization**: Inactive clusters are scaled to zero, freeing up cluster resources
+1. **Sidecar Injection**: Automatically adds a monitoring sidecar to all PostgreSQL pods in the cluster
+2. **Primary-Only Monitoring**: Only the primary pod actively monitors database connections and query activity
+3. **Passive Replicas**: Replica pods run the sidecar container but remain in passive mode (no monitoring)
+4. **Automatic Hibernation**: When the cluster is inactive for the configured duration, the primary sidecar sets the hibernation annotation
+5. **Scheduled Backup Management**: The primary pod automatically pauses scheduled backups when the cluster is hibernated to prevent backup failures
+6. **Switchover Handling**: During switchovers, the new primary automatically takes over monitoring duties while the old primary becomes passive
 
 ## Installation
 
@@ -176,7 +177,8 @@ These resource configurations apply to all sidecar containers injected by the pl
 The plugin provides logging to help monitor its operation:
 
 - Sidecar injection events are logged during pod creation
-- Activity monitoring status is logged at each check interval
+- Activity monitoring status is logged at each check interval (primary pod only)
+- Primary/replica role transitions are logged when pods change status
 - Hibernation events are logged when clusters are scaled down
 - Scheduled backup pause operations are logged
 
@@ -189,8 +191,14 @@ kubectl logs -n cnpg-system deployment/cnpg-i-scale-to-zero-plugin
 And monitor the sidecar logs in the PostgreSQL pods:
 
 ```shell
-kubectl logs <pod-name> -c scale-to-zero
+# View logs from the primary pod's sidecar (active monitoring)
+kubectl logs <primary-pod-name> -c scale-to-zero
+
+# View logs from replica pods' sidecars (passive mode)
+kubectl logs <replica-pod-name> -c scale-to-zero
 ```
+
+**Note**: Primary pod sidecars will show active monitoring logs, while replica pod sidecars will show minimal passive mode logs.
 
 ## Development
 
@@ -214,3 +222,17 @@ make kind-deploy-dev
 This plugin uses the [pluginhelper](https://github.com/cloudnative-pg/cnpg-i-machinery/tree/main/pkg/pluginhelper) from [`cnpg-i-machinery`](https://github.com/cloudnative-pg/cnpg-i-machinery) to simplify the plugin's implementation.
 
 For additional details on the plugin implementation, refer to the [development documentation](doc/development.md).
+
+## Limitations
+
+### Primary-Only Activity Tracking
+
+Currently, the plugin only monitors database activity on the **primary instance**. This means:
+
+- **Read-only workloads on replicas are not tracked** - If your application connects directly to replica instances for read queries, this activity will not prevent hibernation
+- **Replica-only traffic** - Clusters with active read traffic exclusively on replicas may be hibernated despite being in use
+- **Connection pooling to replicas** - Applications using connection poolers that direct read traffic to replicas will not be detected as active
+
+**Workaround**: Ensure critical read workloads also maintain at least one connection to the primary instance, or configure longer inactivity periods to account for replica-only usage patterns.
+
+**Future Enhancement**: Replica activity monitoring may be added in future versions to provide more comprehensive activity detection across the entire cluster.
