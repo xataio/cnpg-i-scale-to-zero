@@ -16,6 +16,8 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/scheme"
+
+	"github.com/xataio/cnpg-i-scale-to-zero/pkg/metadata"
 )
 
 // Start starts the sidecar informers and CNPG-i server
@@ -27,7 +29,7 @@ func Start(ctx context.Context) error {
 	clusterName := viper.GetString("cluster-name")
 	namespace := viper.GetString("namespace")
 
-	setupLog.Info("Starting scale to zero plugin sidecar", "podName", podName, "clusterName", clusterName, "namespace", namespace)
+	setupLog.Info("Starting scale to zero plugin sidecar", "podName", podName, "clusterName", clusterName, "namespace", namespace, "version", metadata.Data.Version)
 
 	clientOptions := client.Options{
 		Scheme: scheme,
