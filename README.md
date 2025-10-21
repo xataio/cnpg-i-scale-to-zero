@@ -1,4 +1,8 @@
-# 0️⃣ CNPG-I Scale-to-Zero Plugin
+<div align="center">
+  <img width="256" height="256" alt="sleeping_elephant" src="https://github.com/user-attachments/assets/5bc20455-ab96-4a69-a96b-0b2721c28fb6" />
+</div>
+
+# CNPG-I Scale-to-Zero Plugin
 
 A [CNPG-I](https://github.com/cloudnative-pg/cnpg-i) plugin that automatically hibernates inactive [CloudNativePG](https://github.com/cloudnative-pg/cloudnative-pg/) clusters to optimize resource usage and reduce costs.
 
