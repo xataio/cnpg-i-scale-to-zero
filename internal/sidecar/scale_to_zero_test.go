@@ -441,54 +441,6 @@ func TestScaleToZero_Start(t *testing.T) {
 			wantErr: nil,
 		},
 		{
-			name: "cluster with scale to zero enabled and inactive cluster, hibernation error replica instance stops the process",
-			client: func(done chan struct{}) *mockClusterClient {
-				return &mockClusterClient{
-					getClusterFunc: func(ctx context.Context, forceUpdate bool) (*cnpgv1.Cluster, error) {
-						return &cnpgv1.Cluster{
-							Status: cnpgv1.ClusterStatus{
-								Phase:          healthyClusterStatus,
-								CurrentPrimary: "test-pod-1",
-							},
-							ObjectMeta: metav1.ObjectMeta{
-								Annotations: map[string]string{
-									scaleToZeroEnabledAnnotation: "true",
-									inactivityMinutesAnnotation:  "5",
-								},
-							},
-						}, nil
-					},
-					updateClusterFunc: func(ctx context.Context, cluster *cnpgv1.Cluster) error {
-						defer func() { done <- struct{}{} }()
-						require.NotNil(t, cluster)
-						require.Equal(t, "on", cluster.Annotations[hibernationAnnotation])
-						return errReplicaInstance
-					},
-					getClusterScheduledBackupFunc: func(ctx context.Context) (*cnpgv1.ScheduledBackup, error) {
-						return nil, fmt.Errorf("scheduledbackups.postgresql.cnpg.io \"test-cluster\" not found")
-					},
-				}
-			},
-			querier: func(_ chan struct{}) *mockQuerier {
-				return &mockQuerier{
-					queryFunc: func(ctx context.Context, query string, args ...any) (postgres.Row, error) {
-						return &mockRow{
-							scanFn: func(dest ...any) error {
-								require.Len(t, dest, 1)
-								count, ok := dest[0].(*int)
-								require.True(t, ok)
-								*count = 0 // Simulate an inactive cluster
-								return nil
-							},
-						}, nil
-					},
-				}
-			},
-			lastActive: time.Now().Add(-time.Minute * 10), // Simulate inactivity
-
-			wantErr: nil,
-		},
-		{
 			name: "cluster with scale to zero enabled, unable to check activity, error ignored",
 			client: func(done chan struct{}) *mockClusterClient {
 				return &mockClusterClient{
@@ -940,25 +892,6 @@ func Test_hibernate(t *testing.T) {
 				},
 			},
 			wantErr: errTest,
-		},
-		{
-			name: "updateCluster returns errReplicaInstance",
-			client: &mockClusterClient{
-				getClusterFunc: func(ctx context.Context, forceUpdate bool) (*cnpgv1.Cluster, error) {
-					return &cnpgv1.Cluster{
-						Status: cnpgv1.ClusterStatus{
-							Phase: healthyClusterStatus,
-						},
-						ObjectMeta: metav1.ObjectMeta{
-							Annotations: map[string]string{},
-						},
-					}, nil
-				},
-				updateClusterFunc: func(ctx context.Context, cluster *cnpgv1.Cluster) error {
-					return errReplicaInstance
-				},
-			},
-			wantErr: errReplicaInstance,
 		},
 	}
 

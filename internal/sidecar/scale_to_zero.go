@@ -56,8 +56,6 @@ const (
 	defaultCheckInterval     = 1 * time.Minute // default check interval for cluster activity
 )
 
-var errReplicaInstance = errors.New("current pod is not the primary instance")
-
 // newScaleToZero creates a new scaleToZero instance with the provided configuration and client.
 func newScaleToZero(ctx context.Context, cfg config, client client.Client) (*scaleToZero, error) {
 	s := &scaleToZero{
@@ -125,10 +123,6 @@ func (s *scaleToZero) Start(ctx context.Context) error {
 			if !isActive {
 				if err := s.hibernate(ctx); err != nil {
 					contextLogger.Error(err, "hibernation failed")
-					// we stop the scale to zero sidecar if this is not the primary instance
-					if errors.Is(err, errReplicaInstance) {
-						return nil
-					}
 					// if hibernation fails, do not try pausing the scheduled backup
 					continue
 				}
