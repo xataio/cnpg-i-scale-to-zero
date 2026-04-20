@@ -103,6 +103,8 @@ func (impl Implementation) reconcileMetadata(
 
 	mutatedPod := pod.DeepCopy()
 
+	superuserSecret := cluster.Name + "-superuser"
+	superuserVolume := "superuser-credentials"
 	sidecarContainer := &corev1.Container{
 		Name:  "scale-to-zero",
 		Image: impl.sidecarImage,
@@ -124,6 +126,13 @@ func (impl Implementation) reconcileMetadata(
 				Value: impl.logLevel,
 			},
 		},
+		VolumeMounts: []corev1.VolumeMount{
+			{
+				Name:      superuserVolume,
+				MountPath: "/etc/superuser",
+				ReadOnly:  true,
+			},
+		},
 		Resources: impl.sidecarResources,
 	}
 
@@ -140,6 +149,15 @@ func (impl Implementation) reconcileMetadata(
 	if err != nil {
 		return nil, err
 	}
+
+	mutatedPod.Spec.Volumes = append(mutatedPod.Spec.Volumes, corev1.Volume{
+		Name: superuserVolume,
+		VolumeSource: corev1.VolumeSource{
+			Secret: &corev1.SecretVolumeSource{
+				SecretName: superuserSecret,
+			},
+		},
+	})
 
 	patch, err := object.CreatePatch(mutatedPod, pod)
 	if err != nil {

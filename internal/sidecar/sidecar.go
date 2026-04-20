@@ -7,7 +7,6 @@ import (
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	"github.com/cloudnative-pg/machinery/pkg/log"
 	"github.com/spf13/viper"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
@@ -35,7 +34,6 @@ func Start(ctx context.Context) error {
 		Scheme: scheme,
 		Cache: &client.CacheOptions{
 			DisableFor: []client.Object{
-				&corev1.Secret{},
 				&cnpgv1.Cluster{},
 			},
 		},
