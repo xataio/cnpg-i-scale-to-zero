@@ -3,13 +3,13 @@ package sidecar
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // clusterRetriever is responsible for retrieving the CloudNativePG cluster and
@@ -80,50 +80,40 @@ func (r *cnpgClusterClient) getCluster(ctx context.Context, forceUpdate bool) (*
 	return r.cluster, nil
 }
 
-func (r *cnpgClusterClient) getClusterCredentials(ctx context.Context) (*postgreSQLCredentials, error) {
-	// The secret name follows the pattern: <cluster-name>-superuser We require
-	// superuser credentials to connect to the PostgreSQL instance and be able
-	// to see the open connections for all users. Using app user will only show
-	// connections for that user.
-	secretName := r.clusterKey.Name + "-superuser"
-	secretKey := types.NamespacedName{
-		Namespace: r.clusterKey.Namespace,
-		Name:      secretName,
-	}
+const credentialsPath = "/etc/superuser" //nolint:gosec // filesystem path, not a credential
 
-	var secret corev1.Secret
-	if err := r.client.Get(ctx, secretKey, &secret); err != nil {
-		return nil, err
+func (r *cnpgClusterClient) getClusterCredentials(_ context.Context) (*postgreSQLCredentials, error) {
+	username, err := readCredentialFile(credentialsPath + "/username")
+	if err != nil {
+		return nil, fmt.Errorf("read superuser username: %w", err)
 	}
-
-	// Extract credentials from the secret
-	username := string(secret.Data["username"])
-	password := string(secret.Data["password"])
-	database := string(secret.Data["dbname"])
+	password, err := readCredentialFile(credentialsPath + "/password")
+	if err != nil {
+		return nil, fmt.Errorf("read superuser password: %w", err)
+	}
+	database, err := readCredentialFile(credentialsPath + "/dbname")
+	if err != nil {
+		return nil, fmt.Errorf("read superuser dbname: %w", err)
+	}
 	if database == "*" || database == "" {
-		database = "postgres" // Default database if not specified
+		database = "postgres"
 	}
 
-	// The host is localhost since the sidecar runs in the same pod
-	host := "localhost"
-	port := "5432" // Default PostgreSQL port
-
-	// Check if port is specified in the secret
-	if portData, exists := secret.Data["port"]; exists {
-		port = string(portData)
-	}
-
-	creds := &postgreSQLCredentials{
+	return &postgreSQLCredentials{
 		username: username,
 		password: password,
 		database: database,
-		host:     host,
-		port:     port,
+		host:     "localhost",
+		port:     "5432",
+	}, nil
+}
+
+func readCredentialFile(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
 	}
-
-	log.FromContext(ctx).Info("Retrieved PostgreSQL credentials")
-
-	return creds, nil
+	return strings.TrimSpace(string(data)), nil
 }
 
 func (r *cnpgClusterClient) getClusterScheduledBackup(ctx context.Context) (*cnpgv1.ScheduledBackup, error) {
