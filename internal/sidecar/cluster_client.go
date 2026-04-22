@@ -3,8 +3,6 @@ package sidecar
 import (
 	"context"
 	"fmt"
-	"os"
-	"strings"
 	"time"
 
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
@@ -27,7 +25,6 @@ type cnpgClusterClient struct {
 // postgreSQLCredentials holds the connection information for PostgreSQL
 type postgreSQLCredentials struct {
 	username string
-	password string
 	database string
 	host     string
 	port     string
@@ -80,40 +77,19 @@ func (r *cnpgClusterClient) getCluster(ctx context.Context, forceUpdate bool) (*
 	return r.cluster, nil
 }
 
-const credentialsPath = "/etc/superuser" //nolint:gosec // filesystem path, not a credential
+// socketDir is the Unix socket directory used by CNPG for the PostgreSQL
+// server. The sidecar container, running with the same UID as the postgres
+// container, authenticates as the "postgres" role via peer auth over this
+// socket — no password required.
+const socketDir = "/controller/run"
 
 func (r *cnpgClusterClient) getClusterCredentials(_ context.Context) (*postgreSQLCredentials, error) {
-	username, err := readCredentialFile(credentialsPath + "/username")
-	if err != nil {
-		return nil, fmt.Errorf("read superuser username: %w", err)
-	}
-	password, err := readCredentialFile(credentialsPath + "/password")
-	if err != nil {
-		return nil, fmt.Errorf("read superuser password: %w", err)
-	}
-	database, err := readCredentialFile(credentialsPath + "/dbname")
-	if err != nil {
-		return nil, fmt.Errorf("read superuser dbname: %w", err)
-	}
-	if database == "*" || database == "" {
-		database = "postgres"
-	}
-
 	return &postgreSQLCredentials{
-		username: username,
-		password: password,
-		database: database,
-		host:     "localhost",
+		username: "postgres",
+		database: "postgres",
+		host:     socketDir,
 		port:     "5432",
 	}, nil
-}
-
-func readCredentialFile(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(data)), nil
 }
 
 func (r *cnpgClusterClient) getClusterScheduledBackup(ctx context.Context) (*cnpgv1.ScheduledBackup, error) {
@@ -129,6 +105,6 @@ func (r *cnpgClusterClient) updateClusterScheduledBackup(ctx context.Context, sc
 }
 
 func (p *postgreSQLCredentials) connString() string {
-	return fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=require",
-		p.host, p.port, p.username, p.password, p.database)
+	return fmt.Sprintf("host=%s port=%s user=%s dbname=%s sslmode=disable application_name=scale-to-zero",
+		p.host, p.port, p.username, p.database)
 }
