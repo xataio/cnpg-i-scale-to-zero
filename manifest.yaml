@@ -16,8 +16,6 @@ rules:
   - scheduledbackups
   verbs:
   - get
-  - list
-  - watch
   - update
   - patch
 ---
