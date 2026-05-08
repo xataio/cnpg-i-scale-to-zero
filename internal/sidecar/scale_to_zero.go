@@ -49,8 +49,9 @@ const (
 	healthyClusterStatus  = "Cluster in healthy state"
 	hibernationAnnotation = "cnpg.io/hibernation"
 
-	scaleToZeroEnabledAnnotation = "xata.io/scale-to-zero-enabled"
-	inactivityMinutesAnnotation  = "xata.io/scale-to-zero-inactivity-minutes"
+	scaleToZeroEnabledAnnotation     = "xata.io/scale-to-zero-enabled"
+	scaleToZeroEnabledAnnotationTrue = "true"
+	inactivityMinutesAnnotation      = "xata.io/scale-to-zero-inactivity-minutes"
 
 	defaultInactivityMinutes = 30              // default inactivity minutes if not set in the annotation
 	defaultCheckInterval     = 1 * time.Minute // default check interval for cluster activity
@@ -258,7 +259,7 @@ func (s *scaleToZero) getClusterScaleToZeroConfig(ctx context.Context, cluster *
 	enabled := false
 	inactivityMinutes := defaultInactivityMinutes
 
-	if value, exists := cluster.Annotations[scaleToZeroEnabledAnnotation]; exists && value == "true" {
+	if value, exists := cluster.Annotations[scaleToZeroEnabledAnnotation]; exists && value == scaleToZeroEnabledAnnotationTrue {
 		enabled = true
 	}
 
