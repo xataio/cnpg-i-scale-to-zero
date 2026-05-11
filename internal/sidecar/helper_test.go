@@ -13,6 +13,8 @@ type mockClusterClient struct {
 	getClusterCredentialsFunc        func(ctx context.Context) (*postgreSQLCredentials, error)
 	getClusterScheduledBackupFunc    func(ctx context.Context) (*cnpgv1.ScheduledBackup, error)
 	updateClusterScheduledBackupFunc func(ctx context.Context, scheduledBackup *cnpgv1.ScheduledBackup) error
+	getClusterBackupsFunc            func(ctx context.Context, i uint) ([]cnpgv1.Backup, error)
+	getClusterBackupsCalls           uint
 }
 
 func (m *mockClusterClient) getCluster(ctx context.Context, forceUpdate bool) (*cnpgv1.Cluster, error) {
@@ -48,6 +50,14 @@ func (m *mockClusterClient) updateClusterScheduledBackup(ctx context.Context, sc
 		return m.updateClusterScheduledBackupFunc(ctx, scheduledBackup)
 	}
 	return nil
+}
+
+func (m *mockClusterClient) getClusterBackups(ctx context.Context) ([]cnpgv1.Backup, error) {
+	m.getClusterBackupsCalls++
+	if m.getClusterBackupsFunc != nil {
+		return m.getClusterBackupsFunc(ctx, m.getClusterBackupsCalls)
+	}
+	return []cnpgv1.Backup{}, nil
 }
 
 type mockQuerier struct {

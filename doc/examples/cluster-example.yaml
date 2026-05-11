@@ -38,6 +38,7 @@ metadata:
   namespace: default
 spec:
   schedule: "0 0 2 * * *"  # Daily at 2 AM (seconds, minutes, hours, day of month, month, day of week)
+  immediate: true
   cluster:
     name: cluster-example
   backupOwnerReference: self

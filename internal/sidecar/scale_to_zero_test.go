@@ -287,6 +287,133 @@ func TestScaleToZero_Start(t *testing.T) {
 			wantErr: nil,
 		},
 		{
+			name: "cluster with scale to zero enabled and inactive cluster with ongoing backup, no hibernation triggered until complete",
+			client: func(done chan struct{}) *mockClusterClient {
+				return &mockClusterClient{
+					getClusterFunc: func(ctx context.Context, forceUpdate bool) (*cnpgv1.Cluster, error) {
+						return &cnpgv1.Cluster{
+							Status: cnpgv1.ClusterStatus{
+								Phase:          healthyClusterStatus,
+								CurrentPrimary: "test-pod-1",
+							},
+							ObjectMeta: metav1.ObjectMeta{
+								Annotations: map[string]string{
+									scaleToZeroEnabledAnnotation: "true",
+									inactivityMinutesAnnotation:  "5",
+								},
+							},
+						}, nil
+					},
+					updateClusterFunc: func(ctx context.Context, cluster *cnpgv1.Cluster) error {
+						defer func() { done <- struct{}{} }()
+						require.NotNil(t, cluster)
+						require.Equal(t, "on", cluster.Annotations[hibernationAnnotation])
+						return nil
+					},
+					getClusterScheduledBackupFunc: func(ctx context.Context) (*cnpgv1.ScheduledBackup, error) {
+						return nil, fmt.Errorf("scheduledbackups.postgresql.cnpg.io \"test-cluster\" not found")
+					},
+					getClusterBackupsFunc: func(ctx context.Context, i uint) ([]cnpgv1.Backup, error) {
+						backup := func(status cnpgv1.BackupPhase) cnpgv1.Backup {
+							return cnpgv1.Backup{
+								Spec: cnpgv1.BackupSpec{
+									Cluster: cnpgv1.LocalObjectReference{
+										Name: "test-cluster",
+									},
+								},
+								Status: cnpgv1.BackupStatus{
+									Phase: status,
+								},
+							}
+						}
+						switch i {
+						case 1:
+							return []cnpgv1.Backup{
+								backup(cnpgv1.BackupPhaseRunning),
+							}, nil
+						case 2:
+							return []cnpgv1.Backup{
+								backup(cnpgv1.BackupPhaseCompleted),
+							}, nil
+						default:
+							return nil, fmt.Errorf("unexpected call to getClusterBackups with index %d", i)
+						}
+					},
+				}
+			},
+
+			querier: func(_ chan struct{}) *mockQuerier {
+				return &mockQuerier{
+					queryFunc: func(ctx context.Context, query string, args ...any) (postgres.Row, error) {
+						return &mockRow{
+							scanFn: func(dest ...any) error {
+								require.Len(t, dest, 1)
+								count, ok := dest[0].(*int)
+								require.True(t, ok)
+								*count = 0 // Simulate an inactive cluster
+								return nil
+							},
+						}, nil
+					},
+				}
+			},
+			lastActive: time.Now().Add(-time.Minute * 10), // Simulate inactivity
+
+			wantErr: nil,
+		},
+		{
+			name: "cluster with scale to zero enabled and inactive cluster with unknown backups, hibernation triggered",
+			client: func(done chan struct{}) *mockClusterClient {
+				return &mockClusterClient{
+					getClusterFunc: func(ctx context.Context, forceUpdate bool) (*cnpgv1.Cluster, error) {
+						return &cnpgv1.Cluster{
+							Status: cnpgv1.ClusterStatus{
+								Phase:          healthyClusterStatus,
+								CurrentPrimary: "test-pod-1",
+							},
+							ObjectMeta: metav1.ObjectMeta{
+								Annotations: map[string]string{
+									scaleToZeroEnabledAnnotation: "true",
+									inactivityMinutesAnnotation:  "5",
+								},
+							},
+						}, nil
+					},
+					updateClusterFunc: func(ctx context.Context, cluster *cnpgv1.Cluster) error {
+						defer func() { done <- struct{}{} }()
+						require.NotNil(t, cluster)
+						require.Equal(t, "on", cluster.Annotations[hibernationAnnotation])
+						return nil
+					},
+					getClusterScheduledBackupFunc: func(ctx context.Context) (*cnpgv1.ScheduledBackup, error) {
+						return nil, fmt.Errorf("scheduledbackups.postgresql.cnpg.io \"test-cluster\" not found")
+					},
+					getClusterBackupsFunc: func(ctx context.Context, i uint) ([]cnpgv1.Backup, error) {
+						return nil, errTest
+					},
+				}
+			},
+
+			querier: func(_ chan struct{}) *mockQuerier {
+				return &mockQuerier{
+					queryFunc: func(ctx context.Context, query string, args ...any) (postgres.Row, error) {
+						return &mockRow{
+							scanFn: func(dest ...any) error {
+								require.Len(t, dest, 1)
+								count, ok := dest[0].(*int)
+								require.True(t, ok)
+								*count = 0 // Simulate an inactive cluster
+								return nil
+							},
+						}, nil
+					},
+				}
+			},
+			lastActive: time.Now().Add(-time.Minute * 10), // Simulate inactivity
+
+			wantErr: nil,
+		},
+		{
 			name: "cluster with scale to zero enabled and inactive cluster, hibernation triggered, scheduled backup get error ignored",
 			client: func(done chan struct{}) *mockClusterClient {
 				return &mockClusterClient{
