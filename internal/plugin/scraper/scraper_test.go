@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	goruntime "runtime"
 	"sync"
 	"testing"
 	"time"
@@ -93,6 +94,27 @@ func TestScraperUnknownScrapeNeverHibernates(t *testing.T) {
 	require.NotEqual(t, scaletozero.HibernationAnnotationValueOn, cluster.Annotations[scaletozero.HibernationAnnotation])
 }
 
+func TestScraperRemovesInactivityStateForDeletedClusters(t *testing.T) {
+	t.Parallel()
+
+	cluster := enabledCluster("default", "cluster", "cluster-1", "10")
+	kubeClient := fakeClient(
+		cluster,
+		runningPrimary("default", "cluster", "cluster-1", "10.0.0.1"),
+	)
+	s := newTestScraper(t, kubeClient, &fakeConnectionsClient{openConnections: 0}, testConfig())
+	key := types.NamespacedName{Namespace: cluster.Namespace, Name: cluster.Name}
+
+	require.NoError(t, s.RunOnce(context.Background(), time.Now()))
+	_, exists := s.getLastActive(key)
+	require.True(t, exists)
+
+	require.NoError(t, kubeClient.Delete(context.Background(), cluster))
+	require.NoError(t, s.RunOnce(context.Background(), time.Now()))
+	_, exists = s.getLastActive(key)
+	require.False(t, exists)
+}
+
 func TestScraperSkipsUnsafeClusters(t *testing.T) {
 	t.Parallel()
 
@@ -162,6 +184,30 @@ func TestScraperSkipsUnsafeClusters(t *testing.T) {
 			require.Zero(t, probe.calls)
 		})
 	}
+}
+
+func TestScraperUsesBoundedWorkers(t *testing.T) {
+	kubeClient := fakeClient(scaleObjects(1000)...)
+	release := make(chan struct{})
+	probe := &fakeConnectionsClient{openConnections: 1, block: release}
+	cfg := testConfig()
+	cfg.Concurrency = 5
+	s := newTestScraper(t, kubeClient, probe, cfg)
+
+	baseline := goruntime.NumGoroutine()
+	done := make(chan error, 1)
+	go func() {
+		done <- s.RunOnce(context.Background(), time.Now())
+	}()
+
+	require.Eventually(t, func() bool {
+		return probe.callCount() == cfg.Concurrency
+	}, time.Second, time.Millisecond)
+	require.LessOrEqual(t, goruntime.NumGoroutine()-baseline, cfg.Concurrency+10)
+
+	close(release)
+	require.NoError(t, <-done)
+	require.Equal(t, 1000, probe.calls)
 }
 
 func TestScraperSlowTargetsAreBoundedByTimeout(t *testing.T) {
@@ -438,6 +484,7 @@ type fakeConnectionsClient struct {
 	openConnections int
 	err             error
 	waitForContext  bool
+	block           <-chan struct{}
 	calls           int
 	current         int
 	maxConcurrent   int
@@ -462,8 +509,21 @@ func (c *fakeConnectionsClient) GetConnections(ctx context.Context, url string) 
 		<-ctx.Done()
 		return 0, ctx.Err()
 	}
+	if c.block != nil {
+		select {
+		case <-c.block:
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		}
+	}
 	if c.err != nil {
 		return 0, c.err
 	}
 	return c.openConnections, nil
+}
+
+func (c *fakeConnectionsClient) callCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.calls
 }

@@ -211,24 +211,33 @@ func (s *Scraper) RunOnce(ctx context.Context, now time.Time) (runErr error) {
 	if err := s.client.List(ctx, clusters); err != nil {
 		return fmt.Errorf("list clusters: %w", err)
 	}
+	s.pruneLastActive(clusters.Items)
 
-	sem := make(chan struct{}, s.cfg.Concurrency)
-	results := make(chan clusterResult, len(clusters.Items))
+	workerCount := min(s.cfg.Concurrency, len(clusters.Items))
+	jobs := make(chan *cnpgv1.Cluster)
+	results := make(chan clusterResult, workerCount)
 	var wg sync.WaitGroup
 
-	for i := range clusters.Items {
-		cluster := clusters.Items[i].DeepCopy()
+	for range workerCount {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			results <- s.processCluster(ctx, cluster, now)
+			for cluster := range jobs {
+				results <- s.processCluster(ctx, cluster, now)
+			}
 		}()
 	}
 
-	wg.Wait()
-	close(results)
+	go func() {
+		for i := range clusters.Items {
+			jobs <- &clusters.Items[i]
+		}
+		close(jobs)
+	}()
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
 
 	var eligibleTargets, pendingInactiveClusters int64
 	for result := range results {
@@ -392,6 +401,25 @@ func (s *Scraper) clearLastActive(key types.NamespacedName) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.lastActive, key)
+}
+
+func (s *Scraper) pruneLastActive(clusters []cnpgv1.Cluster) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	stale := make(map[types.NamespacedName]struct{}, len(s.lastActive))
+	for key := range s.lastActive {
+		stale[key] = struct{}{}
+	}
+	for i := range clusters {
+		delete(stale, types.NamespacedName{
+			Namespace: clusters[i].Namespace,
+			Name:      clusters[i].Name,
+		})
+	}
+	for key := range stale {
+		delete(s.lastActive, key)
+	}
 }
 
 type clusterScaleToZeroConfig struct {
