@@ -219,8 +219,8 @@ make docker-build-dev
 make test
 make lint
 
-# Local development with kind
-make kind-deploy-dev
+# Local Kubernetes development
+tilt up
 ```
 
 This plugin uses the [pluginhelper](https://github.com/cloudnative-pg/cnpg-i-machinery/tree/main/pkg/pluginhelper) from [`cnpg-i-machinery`](https://github.com/cloudnative-pg/cnpg-i-machinery) to simplify the plugin's implementation.

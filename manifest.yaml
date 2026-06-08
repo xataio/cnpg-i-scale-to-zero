@@ -10,12 +10,22 @@ metadata:
   name: cnpg-scale-to-zero-sidecar-role
 rules:
 - apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - postgresql.cnpg.io
   resources:
   - clusters
   - scheduledbackups
   verbs:
   - get
+  - list
+  - watch
   - update
   - patch
 ---
@@ -31,15 +41,6 @@ subjects:
 - kind: ServiceAccount
   name: cnpg-scale-to-zero-plugin
   namespace: cnpg-system
----
-apiVersion: v1
-data:
-  SIDECAR_IMAGE: Z2hjci5pby94YXRhaW8vY25wZy1pLXNjYWxlLXRvLXplcm8tc2lkZWNhcjptYWlu
-kind: Secret
-metadata:
-  name: scale-to-zero-config-tcb898m758
-  namespace: cnpg-system
-type: Opaque
 ---
 apiVersion: v1
 kind: Service
@@ -59,6 +60,10 @@ spec:
     port: 9090
     protocol: TCP
     targetPort: 9090
+  - name: metrics
+    port: 8080
+    protocol: TCP
+    targetPort: metrics
   selector:
     app: scale-to-zero
 ---
@@ -90,6 +95,10 @@ spec:
         env:
         - name: LOG_LEVEL
           value: info
+        - name: METRICS_ADDRESS
+          value: :8080
+        - name: SIDECAR_IMAGE
+          value: ghcr.io/xataio/cnpg-i-scale-to-zero-sidecar:main
         - name: SIDECAR_CPU_REQUEST
           value: 50m
         - name: SIDECAR_CPU_LIMIT
@@ -98,9 +107,14 @@ spec:
           value: 64Mi
         - name: SIDECAR_MEMORY_LIMIT
           value: 64Mi
-        envFrom:
-        - secretRef:
-            name: scale-to-zero-config-tcb898m758
+        - name: SCRAPER_INTERVAL
+          value: 60s
+        - name: SCRAPER_TIMEOUT
+          value: 2s
+        - name: SCRAPER_CONCURRENCY
+          value: "200"
+        - name: SIDECAR_SCRAPE_PORT
+          value: "9188"
         image: ghcr.io/xataio/cnpg-i-scale-to-zero:main
         livenessProbe:
           failureThreshold: 3
@@ -113,6 +127,9 @@ spec:
         ports:
         - containerPort: 9090
           name: grpc
+          protocol: TCP
+        - containerPort: 8080
+          name: metrics
           protocol: TCP
         readinessProbe:
           failureThreshold: 3
