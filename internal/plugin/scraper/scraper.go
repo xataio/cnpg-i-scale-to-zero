@@ -213,6 +213,8 @@ func (s *Scraper) RunOnce(ctx context.Context, now time.Time) (runErr error) {
 	}
 	s.pruneLastActive(clusters.Items)
 
+	// A fixed worker pool bounds goroutine and request growth when one cycle
+	// contains tens of thousands of clusters.
 	workerCount := min(s.cfg.Concurrency, len(clusters.Items))
 	jobs := make(chan *cnpgv1.Cluster)
 	results := make(chan clusterResult, workerCount)
@@ -258,6 +260,8 @@ func (s *Scraper) RunOnce(ctx context.Context, now time.Time) (runErr error) {
 	return nil
 }
 
+// processCluster clears pending inactivity whenever activity cannot be
+// determined reliably. Hibernation requires consecutive successful scrapes.
 func (s *Scraper) processCluster(ctx context.Context, cluster *cnpgv1.Cluster, now time.Time) clusterResult {
 	key := types.NamespacedName{Namespace: cluster.Namespace, Name: cluster.Name}
 	logger := log.FromContext(ctx).WithValues("namespace", cluster.Namespace, "cluster", cluster.Name)
@@ -348,6 +352,8 @@ func (s *Scraper) processCluster(ctx context.Context, cluster *cnpgv1.Cluster, n
 }
 
 func (s *Scraper) hibernate(ctx context.Context, cluster *cnpgv1.Cluster) error {
+	// The cluster list came from the cache at the start of the cycle. Re-read it
+	// before mutation so a stale scrape cannot hibernate a changed cluster.
 	latest := &cnpgv1.Cluster{}
 	key := types.NamespacedName{Namespace: cluster.Namespace, Name: cluster.Name}
 	if err := s.client.Get(ctx, key, latest); err != nil {
@@ -407,6 +413,8 @@ func (s *Scraper) pruneLastActive(clusters []cnpgv1.Cluster) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// The inactivity map outlives each cache list, so deleted clusters must be
+	// removed explicitly.
 	stale := make(map[types.NamespacedName]struct{}, len(s.lastActive))
 	for key := range s.lastActive {
 		stale[key] = struct{}{}
