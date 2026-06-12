@@ -2,6 +2,9 @@
 package config
 
 import (
+	"strconv"
+	"time"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 )
@@ -9,10 +12,19 @@ import (
 // Config holds the configuration for the scale-to-zero plugin
 type Config struct {
 	// SidecarImage is the container image to use for the sidecar
-	SidecarImage string
-	LogLevel     string
+	SidecarImage   string
+	LogLevel       string
+	MetricsAddress string
 	// SidecarResources defines resource requirements for the sidecar container
 	SidecarResources *ResourceConfig
+	Scraper          ScraperConfig
+}
+
+type ScraperConfig struct {
+	Interval          time.Duration
+	Timeout           time.Duration
+	Concurrency       int
+	SidecarScrapePort int32
 }
 
 // ResourceConfig defines resource configuration for a container
@@ -24,19 +36,24 @@ type ResourceConfig struct {
 }
 
 const (
-	defaultSidecarImage = "ghcr.io/xataio/cnpg-i-scale-to-zero-sidecar:main"
-	defaultLogLevel     = "info"
-	defaultCPURequest   = "50m"
-	defaultCPULimit     = "200m"
+	defaultSidecarImage   = "ghcr.io/xataio/cnpg-i-scale-to-zero-sidecar:main"
+	defaultLogLevel       = "info"
+	defaultMetricsAddress = ":8080"
+	defaultCPURequest     = "50m"
+	defaultCPULimit       = "200m"
 	// for memory the request and limit are set to the same value to prevent OOM
 	// issues
 	defaultMemoryRequest = "64Mi"
 	defaultMemoryLimit   = "64Mi"
+	defaultInterval      = 60 * time.Second
+	defaultTimeout       = 2 * time.Second
+	defaultConcurrency   = 200
+	defaultScrapePort    = int32(9188)
 )
 
 // New creates a new Config instance with the provided parameters.
 // Environment variables are used to override defaults if the parameters are empty.
-func New(sidecarImage, logLevel string, resourceConfig *ResourceConfig) *Config {
+func New(sidecarImage, logLevel, metricsAddress string, resourceConfig *ResourceConfig, scraperConfig ScraperConfig) *Config {
 	if sidecarImage == "" {
 		sidecarImage = defaultSidecarImage
 	}
@@ -44,12 +61,42 @@ func New(sidecarImage, logLevel string, resourceConfig *ResourceConfig) *Config 
 	if logLevel == "" {
 		logLevel = defaultLogLevel
 	}
+	if metricsAddress == "" {
+		metricsAddress = defaultMetricsAddress
+	}
 
 	return &Config{
 		SidecarImage:     sidecarImage,
 		LogLevel:         logLevel,
+		MetricsAddress:   metricsAddress,
 		SidecarResources: resourceConfig,
+		Scraper:          scraperConfig.WithDefaults(),
 	}
+}
+
+func NewScraperConfig(interval, timeout, concurrency, sidecarScrapePort string) ScraperConfig {
+	return ScraperConfig{
+		Interval:          parseDuration(interval, defaultInterval),
+		Timeout:           parseDuration(timeout, defaultTimeout),
+		Concurrency:       parseInt(concurrency, defaultConcurrency),
+		SidecarScrapePort: int32(parseInt(sidecarScrapePort, int(defaultScrapePort))),
+	}.WithDefaults()
+}
+
+func (cfg ScraperConfig) WithDefaults() ScraperConfig {
+	if cfg.Interval <= 0 {
+		cfg.Interval = defaultInterval
+	}
+	if cfg.Timeout <= 0 {
+		cfg.Timeout = defaultTimeout
+	}
+	if cfg.Concurrency <= 0 {
+		cfg.Concurrency = defaultConcurrency
+	}
+	if cfg.SidecarScrapePort <= 0 {
+		cfg.SidecarScrapePort = defaultScrapePort
+	}
+	return cfg
 }
 
 // ToResourceRequirements converts the SidecarResourceConfig to Kubernetes
@@ -78,4 +125,26 @@ func applyResourceQuantity(resourceList corev1.ResourceList, resourceName corev1
 		parsedQuantity = resource.MustParse(defaultQuantity)
 	}
 	resourceList[resourceName] = parsedQuantity
+}
+
+func parseDuration(value string, fallback time.Duration) time.Duration {
+	if value == "" {
+		return fallback
+	}
+	duration, err := time.ParseDuration(value)
+	if err != nil {
+		return fallback
+	}
+	return duration
+}
+
+func parseInt(value string, fallback int) int {
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }

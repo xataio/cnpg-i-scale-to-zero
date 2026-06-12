@@ -28,6 +28,9 @@ spec:
         - containerPort: 9090
           protocol: TCP
           name: grpc
+        - containerPort: 8080
+          protocol: TCP
+          name: metrics
         args:
         - plugin
         - --server-cert=/server/tls.crt
@@ -37,6 +40,10 @@ spec:
         env:
         - name: LOG_LEVEL
           value: info
+        - name: METRICS_ADDRESS
+          value: ":8080"
+        - name: SIDECAR_IMAGE
+          value: ghcr.io/xataio/cnpg-i-scale-to-zero-sidecar:main
         - name: SIDECAR_CPU_REQUEST
           value: "50m"
         - name: SIDECAR_CPU_LIMIT
@@ -45,11 +52,14 @@ spec:
           value: "64Mi"
         - name: SIDECAR_MEMORY_LIMIT
           value: "64Mi"
-        envFrom:
-        # use a secret instead of an env variable to configure the sidecar image
-        # so that the image mapping works out of the box
-        - secretRef:
-            name: scale-to-zero-config
+        - name: SCRAPER_INTERVAL
+          value: "60s"
+        - name: SCRAPER_TIMEOUT
+          value: "2s"
+        - name: SCRAPER_CONCURRENCY
+          value: "200"
+        - name: SIDECAR_SCRAPE_PORT
+          value: "9188"
         volumeMounts:
         - mountPath: /server
           name: server

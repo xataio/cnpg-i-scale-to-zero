@@ -2,6 +2,7 @@ package config
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -35,34 +36,46 @@ func TestNew(t *testing.T) {
 			expectedSidecarImage: defaultSidecarImage,
 			expectedLogLevel:     defaultLogLevel,
 		},
-		{
-			name:                 "empty sidecar image",
-			sidecarImage:         "",
-			logLevel:             "warn",
-			resourceConfig:       &ResourceConfig{CPURequest: "50m"},
-			expectedSidecarImage: defaultSidecarImage,
-			expectedLogLevel:     "warn",
-		},
-		{
-			name:                 "empty log level",
-			sidecarImage:         "another/image:latest",
-			logLevel:             "",
-			resourceConfig:       nil,
-			expectedSidecarImage: "another/image:latest",
-			expectedLogLevel:     defaultLogLevel,
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			cfg := New(tt.sidecarImage, tt.logLevel, tt.resourceConfig)
+			cfg := New(tt.sidecarImage, tt.logLevel, "", tt.resourceConfig, ScraperConfig{})
 			require.Equal(t, tt.expectedSidecarImage, cfg.SidecarImage)
 			require.Equal(t, tt.expectedLogLevel, cfg.LogLevel)
+			require.Equal(t, defaultMetricsAddress, cfg.MetricsAddress)
 			require.Equal(t, tt.resourceConfig, cfg.SidecarResources)
+			require.Equal(t, defaultInterval, cfg.Scraper.Interval)
+			require.Equal(t, defaultTimeout, cfg.Scraper.Timeout)
+			require.Equal(t, defaultConcurrency, cfg.Scraper.Concurrency)
+			require.Equal(t, defaultScrapePort, cfg.Scraper.SidecarScrapePort)
 		})
 	}
+}
+
+func TestNewScraperConfig(t *testing.T) {
+	t.Parallel()
+
+	cfg := NewScraperConfig("30s", "500ms", "12", "9190")
+	require.Equal(t, 30*time.Second, cfg.Interval)
+	require.Equal(t, 500*time.Millisecond, cfg.Timeout)
+	require.Equal(t, 12, cfg.Concurrency)
+	require.Equal(t, int32(9190), cfg.SidecarScrapePort)
+
+	cfg = NewScraperConfig("invalid", "invalid", "invalid", "invalid")
+	require.Equal(t, defaultInterval, cfg.Interval)
+	require.Equal(t, defaultTimeout, cfg.Timeout)
+	require.Equal(t, defaultConcurrency, cfg.Concurrency)
+	require.Equal(t, defaultScrapePort, cfg.SidecarScrapePort)
+}
+
+func TestNewMetricsAddress(t *testing.T) {
+	t.Parallel()
+
+	cfg := New("", "", ":9091", nil, ScraperConfig{})
+	require.Equal(t, ":9091", cfg.MetricsAddress)
 }
 
 func TestResourceConfig_ToResourceRequirements(t *testing.T) {
