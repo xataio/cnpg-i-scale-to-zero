@@ -18,6 +18,7 @@ import (
 	"github.com/xataio/cnpg-i-scale-to-zero/internal/config"
 	pluginmetrics "github.com/xataio/cnpg-i-scale-to-zero/internal/plugin/metrics"
 	"github.com/xataio/cnpg-i-scale-to-zero/internal/scaletozero"
+	"github.com/xataio/cnpg-i-scale-to-zero/pkg/hibernation"
 	"go.opentelemetry.io/otel/metric/noop"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -68,6 +69,72 @@ func TestScraperZeroConnectionsHibernateAfterInactivityPeriod(t *testing.T) {
 	require.NoError(t, kubeClient.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "cluster"}, backup))
 	require.NotNil(t, backup.Spec.Suspend)
 	require.True(t, *backup.Spec.Suspend)
+}
+
+func TestScraperDelegatesHibernationWithoutMutatingCNPGResources(t *testing.T) {
+	t.Parallel()
+
+	cluster := enabledCluster("default", "cluster", "cluster-1", "10")
+	cluster.UID = "cluster-uid"
+	cluster.OwnerReferences = []metav1.OwnerReference{{
+		APIVersion: "xata.io/v1alpha1",
+		Kind:       "Branch",
+		Name:       "branch",
+		UID:        "branch-uid",
+		Controller: new(true),
+	}}
+	kubeClient := fakeClient(
+		cluster,
+		runningPrimary("default", "cluster", "cluster-1", "10.0.0.1"),
+		scheduledBackup("default", "cluster"),
+	)
+	hibernator := &recordingHibernator{}
+	s := newTestScraper(
+		t,
+		kubeClient,
+		&fakeConnectionsClient{openConnections: 0},
+		testConfig(),
+		WithHibernator(hibernator),
+	)
+	now := time.Now()
+
+	require.NoError(t, s.RunOnce(context.Background(), now))
+	require.NoError(t, s.RunOnce(context.Background(), now.Add(11*time.Minute)))
+
+	require.Equal(t, hibernation.Target{
+		Key:             types.NamespacedName{Namespace: "default", Name: "cluster"},
+		UID:             "cluster-uid",
+		OwnerReferences: cluster.OwnerReferences,
+	}, hibernator.target)
+	require.NotEqual(
+		t,
+		scaletozero.HibernationAnnotationValueOn,
+		getCluster(t, kubeClient, "default", "cluster").Annotations[scaletozero.HibernationAnnotation],
+	)
+	backup := &cnpgv1.ScheduledBackup{}
+	require.NoError(t, kubeClient.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "cluster"}, backup))
+	require.Nil(t, backup.Spec.Suspend)
+}
+
+func TestDefaultHibernatorRejectsStaleTarget(t *testing.T) {
+	t.Parallel()
+
+	cluster := enabledCluster("default", "cluster", "cluster-1", "10")
+	cluster.UID = "current-uid"
+	kubeClient := fakeClient(cluster)
+	hibernator := &defaultHibernator{client: kubeClient}
+
+	err := hibernator.Hibernate(context.Background(), hibernation.Target{
+		Key: types.NamespacedName{Namespace: "default", Name: "cluster"},
+		UID: "stale-uid",
+	})
+
+	require.EqualError(t, err, "cluster UID changed")
+	require.NotEqual(
+		t,
+		scaletozero.HibernationAnnotationValueOn,
+		getCluster(t, kubeClient, "default", "cluster").Annotations[scaletozero.HibernationAnnotation],
+	)
 }
 
 func TestScraperUnknownScrapeNeverHibernates(t *testing.T) {
@@ -353,11 +420,26 @@ func testConfig() config.ScraperConfig {
 	}
 }
 
-func newTestScraper(t *testing.T, kubeClient client.Client, connectionsClient ConnectionsClient, cfg config.ScraperConfig) *Scraper {
+func newTestScraper(
+	t *testing.T,
+	kubeClient client.Client,
+	connectionsClient ConnectionsClient,
+	cfg config.ScraperConfig,
+	options ...Option,
+) *Scraper {
 	t.Helper()
-	s, err := New(kubeClient, connectionsClient, cfg, noop.NewMeterProvider().Meter("test"))
+	s, err := New(kubeClient, connectionsClient, cfg, noop.NewMeterProvider().Meter("test"), options...)
 	require.NoError(t, err)
 	return s
+}
+
+type recordingHibernator struct {
+	target hibernation.Target
+}
+
+func (h *recordingHibernator) Hibernate(_ context.Context, target hibernation.Target) error {
+	h.target = target
+	return nil
 }
 
 func histogramCountsByLabel(family *dto.MetricFamily, label string) map[string]uint64 {
