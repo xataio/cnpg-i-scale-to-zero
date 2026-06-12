@@ -11,6 +11,7 @@ import (
 	"github.com/cloudnative-pg/machinery/pkg/log"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -18,6 +19,7 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
@@ -112,12 +114,35 @@ func newPluginCommand(options options) *cobra.Command {
 	originalRunE := cmd.RunE
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		cfg := newConfig()
-		if err := startScraper(cmd.Context(), cfg.Scraper, cfg.MetricsAddress, options); err != nil {
+		scraperManager, err := newScraperManager(cmd.Context(), cfg.Scraper, cfg.MetricsAddress, options)
+		if err != nil {
 			return err
 		}
-		return originalRunE(cmd, args)
+		return runPlugin(
+			cmd.Context(),
+			func(ctx context.Context) error {
+				cmd.SetContext(ctx)
+				return originalRunE(cmd, args)
+			},
+			scraperManager.Start,
+		)
 	}
 	return cmd
+}
+
+func runPlugin(
+	ctx context.Context,
+	serve func(context.Context) error,
+	scrape func(context.Context) error,
+) error {
+	group, ctx := errgroup.WithContext(ctx)
+	group.Go(func() error {
+		return serve(ctx)
+	})
+	group.Go(func() error {
+		return scrape(ctx)
+	})
+	return group.Wait()
 }
 
 func newConfig() *config.Config {
@@ -140,19 +165,24 @@ func newConfig() *config.Config {
 	)
 }
 
-func startScraper(ctx context.Context, cfg config.ScraperConfig, metricsAddress string, options options) error {
+func newScraperManager(
+	ctx context.Context,
+	cfg config.ScraperConfig,
+	metricsAddress string,
+	options options,
+) (manager.Manager, error) {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(cnpgv1.AddToScheme(scheme))
 	for _, registration := range options.schemeRegistrations {
 		if err := registration(scheme); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
 	meterProvider, err := pluginmetrics.NewProvider(ctrlmetrics.Registry)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
@@ -160,7 +190,7 @@ func startScraper(ctx context.Context, cfg config.ScraperConfig, metricsAddress 
 		Metrics: server.Options{BindAddress: metricsAddress},
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	for _, object := range []client.Object{
 		&cnpgv1.Cluster{},
@@ -168,7 +198,7 @@ func startScraper(ctx context.Context, cfg config.ScraperConfig, metricsAddress 
 		&corev1.Pod{},
 	} {
 		if _, err := mgr.GetCache().GetInformer(ctx, object); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
@@ -176,7 +206,7 @@ func startScraper(ctx context.Context, cfg config.ScraperConfig, metricsAddress 
 	if options.hibernatorFactory != nil {
 		hibernator := options.hibernatorFactory(mgr.GetClient(), mgr.GetAPIReader())
 		if hibernator == nil {
-			return errors.New("hibernator factory returned nil")
+			return nil, errors.New("hibernator factory returned nil")
 		}
 		scraperOptions = append(scraperOptions, scraper.WithHibernator(hibernator))
 	}
@@ -188,24 +218,19 @@ func startScraper(ctx context.Context, cfg config.ScraperConfig, metricsAddress 
 		scraperOptions...,
 	)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := mgr.Add(managerRunnable{fn: s.Start}); err != nil {
-		return err
+		return nil, err
 	}
 	if err := mgr.Add(managerRunnable{fn: func(ctx context.Context) error {
 		<-ctx.Done()
 		return meterProvider.Shutdown(context.WithoutCancel(ctx))
 	}}); err != nil {
-		return err
+		return nil, err
 	}
 
-	go func() {
-		if err := mgr.Start(ctx); err != nil {
-			log.FromContext(ctx).Error(err, "scraper manager stopped")
-		}
-	}()
-	return nil
+	return mgr, nil
 }
 
 type managerRunnable struct {
