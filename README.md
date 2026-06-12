@@ -8,16 +8,41 @@ A [CNPG-I](https://github.com/cloudnative-pg/cnpg-i) plugin that automatically h
 
 ## Overview
 
-This plugin monitors PostgreSQL database activity and automatically scales clusters down to zero replicas when they've been inactive for a configurable period. It injects a monitoring sidecar into all pods of the PostgreSQL cluster. Only the primary pod actively monitors database connections and manages hibernation, while replica pods run the sidecar in passive mode until promoted to primary.
+This plugin monitors PostgreSQL database activity and automatically hibernates
+clusters after a configurable inactivity period. It injects a passive HTTP
+probe into every PostgreSQL pod. A central scraper in the plugin deployment
+watches CloudNativePG resources, probes the current primary, and performs all
+Kubernetes updates.
 
 ### How It Works
 
-1. **Sidecar Injection**: Automatically adds a monitoring sidecar to all PostgreSQL pods in the cluster
-2. **Primary-Only Monitoring**: Only the primary pod actively monitors database connections and query activity
-3. **Passive Replicas**: Replica pods run the sidecar container but remain in passive mode (no monitoring)
-4. **Automatic Hibernation**: When the cluster is inactive for the configured duration, the primary sidecar sets the hibernation annotation
-5. **Scheduled Backup Management**: The primary pod automatically pauses scheduled backups when the cluster is hibernated to prevent backup failures
-6. **Switchover Handling**: During switchovers, the new primary automatically takes over monitoring duties while the old primary becomes passive
+1. **Sidecar Injection**: The lifecycle hook adds a passive connections probe
+   to every PostgreSQL pod.
+2. **Cached Discovery**: The central scraper watches `Cluster`, `Pod`, and
+   `ScheduledBackup` objects and selects `status.currentPrimary`.
+3. **Activity Scraping**: The scraper requests `GET /connections` from the
+   current primary sidecar. The sidecar queries PostgreSQL through the shared
+   Unix socket and returns the open connection count.
+4. **Safe Inactivity Tracking**: Only consecutive successful zero-connection
+   scrapes count toward inactivity. Missing pods, unhealthy clusters, timeouts,
+   and probe errors reset the inactivity window.
+5. **Central Hibernation**: After the inactivity threshold, the plugin sets
+   `cnpg.io/hibernation=on` and suspends the same-name `ScheduledBackup`.
+
+### Architecture
+
+```mermaid
+flowchart LR
+    Operator[CloudNativePG operator] -->|LifecycleHook| Plugin[Scale-to-zero plugin]
+    Plugin -->|Pod patch with sidecar| Operator
+    API[Kubernetes API] -->|Cached watches| Plugin
+    Plugin -->|GET /connections| Probe[Primary pod sidecar]
+    Probe -->|Unix socket query| Postgres[PostgreSQL primary]
+    Plugin -->|Hibernate Cluster and suspend ScheduledBackup| API
+```
+
+The sidecar has no Kubernetes client and receives no sidecar-specific RBAC.
+Kubernetes reads and writes are owned by the central plugin service account.
 
 ## Installation
 
@@ -90,22 +115,9 @@ See the [cluster example](doc/examples/cluster-example.yaml) for a complete conf
 
 #### RBAC
 
-**Important**: Each cluster that uses scale-to-zero functionality requires specific RBAC permissions for the sidecar to update cluster resources and manage scheduled backups.
-
-Create the required RBAC using the template:
-
-```bash
-# Copy the RBAC template
-curl -O https://raw.githubusercontent.com/xataio/cnpg-i-scale-to-zero/main/doc/examples/rbac-template.yaml
-
-# Edit the template to replace CLUSTER_NAME and NAMESPACE
-sed -i 's/CLUSTER_NAME/my-cluster/g; s/NAMESPACE/default/g' rbac-template.yaml
-
-# Apply the RBAC configuration
-kubectl apply -f rbac-template.yaml
-```
-
-Or see the [RBAC template](doc/examples/rbac-template.yaml) for manual customization.
+The installation manifest grants the central plugin service account permission
+to watch pods and CloudNativePG resources and to update clusters and scheduled
+backups. No per-cluster sidecar RBAC is required.
 
 #### Resource Configuration
 
@@ -178,31 +190,23 @@ These resource configurations apply to all sidecar containers injected by the pl
 
 ## Monitoring and Observability
 
-The plugin provides logging to help monitor its operation:
-
-- Sidecar injection events are logged during pod creation
-- Activity monitoring status is logged at each check interval (primary pod only)
-- Primary/replica role transitions are logged when pods change status
-- Hibernation events are logged when clusters are scaled down
-- Scheduled backup pause operations are logged
+The central plugin logs scrape eligibility, probe errors, and hibernation
+errors. Sidecar logs cover probe startup and PostgreSQL query errors.
 
 You can view the plugin logs using:
 
 ```shell
-kubectl logs -n cnpg-system deployment/cnpg-i-scale-to-zero-plugin
+kubectl logs -n cnpg-system deployment/scale-to-zero
 ```
 
-And monitor the sidecar logs in the PostgreSQL pods:
+View a pod's passive probe logs with:
 
 ```shell
-# View logs from the primary pod's sidecar (active monitoring)
-kubectl logs <primary-pod-name> -c scale-to-zero
-
-# View logs from replica pods' sidecars (passive mode)
-kubectl logs <replica-pod-name> -c scale-to-zero
+kubectl logs <postgres-pod-name> -c scale-to-zero
 ```
 
-**Note**: Primary pod sidecars will show active monitoring logs, while replica pod sidecars will show minimal passive mode logs.
+Prometheus metrics are exposed by the plugin on the service port named
+`metrics`.
 
 ## Development
 

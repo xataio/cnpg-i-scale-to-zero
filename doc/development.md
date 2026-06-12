@@ -138,15 +138,17 @@ The lifecycle hook injects these environment variables into the sidecar:
 
 ### Startup Command
 
-The plugin runs in its own pod, and its main command is implemented in
-[`cmd/plugin/plugin.go`](../cmd/plugin/plugin.go).
+The plugin runs in its own pod. The executable entry point is
+[`cmd/plugin/plugin.go`](../cmd/plugin/plugin.go), and the command is constructed
+in [`pkg/plugin/plugin.go`](../pkg/plugin/plugin.go).
 
 This function uses the plugin helper library to create a gRPC server and manage
 TLS.
 
-The command passes the identity implementation to `http.CreateMainCmd`, starts
-the controller-runtime manager and scraper, and registers the lifecycle
-implementation with the gRPC server.
+The command passes the identity implementation to `http.CreateMainCmd`,
+constructs the controller-runtime manager and scraper, and registers the
+lifecycle implementation with the gRPC server. The manager and gRPC server
+share a context so either one terminating stops the plugin.
 
 ```go
 lifecycle.RegisterOperatorLifecycleServer(
