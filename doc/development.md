@@ -46,9 +46,9 @@ Some examples of what can be achieved through the lifecycle:
 
 [API reference](https://github.com/cloudnative-pg/cnpg-i/blob/main/proto/operator_lifecycle.proto)
 
-The scale-to-zero plugin uses this to inject a passive sidecar container into
+The scale-to-zero plugin uses this to inject a sidecar HTTP server into
 PostgreSQL pods. The central plugin deployment scrapes the current primary pod
-and hibernates clusters when successful probe data shows inactivity for the
+and hibernates clusters when successful responses show inactivity for the
 configured duration.
 
 ## Implementation
@@ -100,21 +100,22 @@ The scale-to-zero plugin specifically:
 ### Sidecar Implementation
 
 The sidecar is a separate component that runs alongside the PostgreSQL container.
-It's implemented in the `internal/sidecar` package and exposes passive activity
-data over HTTP.
+It's implemented in the `internal/sidecar` package and returns the number of
+PostgreSQL connections over HTTP.
 
 #### Sidecar Startup ([`sidecar.go`](../internal/sidecar/sidecar.go))
 
 The sidecar startup code:
 
-- Reads the probe listen address
+- Reads the HTTP listen address
 - Serves `GET /connections` on the configured listen address
 
-#### Activity Probe ([`probe.go`](../internal/sidecar/probe.go))
+#### HTTP Server ([`probe.go`](../internal/sidecar/probe.go))
 
-The sidecar connections probe reports PostgreSQL connection counts:
+The sidecar runs an HTTP server that returns the number of PostgreSQL
+connections:
 
-- **Connections Probe**: Connects to PostgreSQL over the CNPG Unix socket and
+- **Connection Count**: Connects to PostgreSQL over the CNPG Unix socket and
   checks for open connections
 - **HTTP API**: Returns the open connection count as a JSON integer from
   `GET /connections`
@@ -125,14 +126,13 @@ Key features:
 
 - PostgreSQL connection pooling for activity monitoring
 - Graceful shutdown on context cancellation
-- No Kubernetes client, CNPG API dependency, or Kubernetes writes
 
 #### Environment Variables
 
 The lifecycle hook injects these environment variables into the sidecar:
 
 - `LOG_LEVEL`: The log level for the sidecar
-- `LISTEN_ADDRESS`: The HTTP probe listen address (default: `:9188`)
+- `LISTEN_ADDRESS`: The HTTP server listen address (default: `:9188`)
 - `PGHOST`: The CNPG PostgreSQL Unix socket directory
 - `PGPORT`: The CNPG PostgreSQL server port
 
@@ -156,44 +156,6 @@ lifecycle.RegisterOperatorLifecycleServer(
     lifecycleImpl.NewImplementation(cfg),
 )
 ```
-
-## Scale-to-Zero Functionality
-
-### How It Works
-
-The scale-to-zero plugin automatically hibernates PostgreSQL clusters when they
-are inactive for a specified period. Here's how it operates:
-
-1. **Sidecar Injection**: When a PostgreSQL pod is created, the plugin injects a
-   sidecar container that exposes database activity to the central scraper.
-
-2. **Activity Monitoring**: The central scraper watches CNPG objects and scrapes
-   the primary pod sidecar over HTTP.
-
-3. **Hibernation**: When the cluster has been inactive for the configured duration,
-   the central plugin sets the `cnpg.io/hibernation` annotation on the cluster, causing
-   CloudNativePG to scale it down to zero replicas.
-
-4. **Scheduled Backup Management**: After hibernating a cluster, the plugin
-   pauses the `ScheduledBackup` with the same namespace and name as the cluster.
-
-### Configuration
-
-The plugin behavior can be configured through cluster annotations:
-
-- `xata.io/scale-to-zero-enabled`: If the scale to zero behaviour should be applied for the cluster (default: false)
-- `xata.io/scale-to-zero-inactivity-minutes`: Sets the inactivity threshold in minutes before
-  hibernation (default: 30 minutes)
-- `cnpg.io/hibernation`: Used by the plugin to trigger hibernation (set automatically)
-
-### Sidecar Container
-
-The injected sidecar container is configurable and uses environment-based configuration:
-
-- **Default image**: `ghcr.io/xataio/cnpg-i-scale-to-zero-sidecar:main`
-- **Configurable via**: `SIDECAR_IMAGE` on the plugin deployment
-- Access to PostgreSQL through the shared CNPG Unix socket
-- HTTP connections probe on the port configured by `SIDECAR_SCRAPE_PORT`
 
 ### Central Scraper
 
