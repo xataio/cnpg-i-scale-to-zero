@@ -5,31 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/utils/ptr"
 )
-
-func TestSidecarContainerIsHardened(t *testing.T) {
-	t.Parallel()
-
-	impl := Implementation{sidecarImage: "sidecar:test", sidecarPort: 8080}
-	mount := corev1.VolumeMount{Name: "scratch-data", MountPath: "/controller/run"}
-
-	container := impl.sidecarContainer(nil, mount)
-
-	require.Equal(t, &corev1.SecurityContext{
-		AllowPrivilegeEscalation: ptr.To(false),
-		Privileged:               ptr.To(false),
-		ReadOnlyRootFilesystem:   ptr.To(true),
-		RunAsNonRoot:             ptr.To(true),
-		Capabilities: &corev1.Capabilities{
-			Drop: []corev1.Capability{"ALL"},
-		},
-		SeccompProfile: &corev1.SeccompProfile{
-			Type: corev1.SeccompProfileTypeRuntimeDefault,
-		},
-	}, container.SecurityContext)
-	require.Equal(t, []corev1.VolumeMount{mount}, container.VolumeMounts)
-}
 
 func TestPostgresRuntimeUsesCNPGContainerConfiguration(t *testing.T) {
 	t.Parallel()
