@@ -14,6 +14,7 @@ import (
 	"github.com/cloudnative-pg/cnpg-i/pkg/lifecycle"
 	"github.com/cloudnative-pg/machinery/pkg/log"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/utils/ptr"
 
 	"github.com/xataio/cnpg-i-scale-to-zero/internal/config"
 	"github.com/xataio/cnpg-i-scale-to-zero/internal/scaletozero"
@@ -114,30 +115,7 @@ func (impl Implementation) reconcileMetadata(
 		return nil, err
 	}
 
-	sidecarContainer := &corev1.Container{
-		Name:  "scale-to-zero",
-		Image: impl.sidecarImage,
-		Ports: []corev1.ContainerPort{
-			{
-				Name:          "connections",
-				ContainerPort: impl.sidecarPort,
-				Protocol:      corev1.ProtocolTCP,
-			},
-		},
-		Env: []corev1.EnvVar{
-			{
-				Name:  "LOG_LEVEL",
-				Value: impl.logLevel,
-			},
-			{
-				Name:  "LISTEN_ADDRESS",
-				Value: fmt.Sprintf(":%d", impl.sidecarPort),
-			},
-		},
-		VolumeMounts: []corev1.VolumeMount{scratchDataMount},
-		Resources:    impl.sidecarResources,
-	}
-	sidecarContainer.Env = append(sidecarContainer.Env, postgresEnv...)
+	sidecarContainer := impl.sidecarContainer(postgresEnv, scratchDataMount)
 
 	if mutatedPod.Labels == nil {
 		mutatedPod.Labels = make(map[string]string)
@@ -168,6 +146,60 @@ func (impl Implementation) reconcileMetadata(
 	return &lifecycle.OperatorLifecycleResponse{
 		JsonPatch: patch,
 	}, nil
+}
+
+// sidecarContainer returns the scale-to-zero sidecar container to inject
+// into a CNPG instance pod.
+func (impl Implementation) sidecarContainer(
+	postgresEnv []corev1.EnvVar,
+	scratchDataMount corev1.VolumeMount,
+) *corev1.Container {
+	container := &corev1.Container{
+		Name:  "scale-to-zero",
+		Image: impl.sidecarImage,
+		Ports: []corev1.ContainerPort{
+			{
+				Name:          "connections",
+				ContainerPort: impl.sidecarPort,
+				Protocol:      corev1.ProtocolTCP,
+			},
+		},
+		Env: []corev1.EnvVar{
+			{
+				Name:  "LOG_LEVEL",
+				Value: impl.logLevel,
+			},
+			{
+				Name:  "LISTEN_ADDRESS",
+				Value: fmt.Sprintf(":%d", impl.sidecarPort),
+			},
+		},
+		VolumeMounts:    []corev1.VolumeMount{scratchDataMount},
+		Resources:       impl.sidecarResources,
+		SecurityContext: sidecarSecurityContext(),
+	}
+	container.Env = append(container.Env, postgresEnv...)
+
+	return container
+}
+
+// sidecarSecurityContext returns the container security context for the
+// sidecar. It drops all capabilities, prevents privilege escalation, makes
+// the root filesystem read-only, requires a non-root user, and applies the
+// runtime's default seccomp profile.
+func sidecarSecurityContext() *corev1.SecurityContext {
+	return &corev1.SecurityContext{
+		AllowPrivilegeEscalation: ptr.To(false),
+		Privileged:               ptr.To(false),
+		ReadOnlyRootFilesystem:   ptr.To(true),
+		RunAsNonRoot:             ptr.To(true),
+		Capabilities: &corev1.Capabilities{
+			Drop: []corev1.Capability{"ALL"},
+		},
+		SeccompProfile: &corev1.SeccompProfile{
+			Type: corev1.SeccompProfileTypeRuntimeDefault,
+		},
+	}
 }
 
 // postgresRuntime copies CNPG's PostgreSQL connection environment and finds
