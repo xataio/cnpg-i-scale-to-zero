@@ -52,8 +52,18 @@ jobs:
         with:
           version: v2.15.0
 
+  govulncheck:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: govulncheck
+        uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
+        with:
+          go-version-file: go.mod
+          go-package: ./...
+
   docker-build:
-    needs: [test, lint]
+    needs: [test, lint, govulncheck]
     if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'release'
     uses: ./.github/workflows/docker-build.yml
     with:
