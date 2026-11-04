@@ -11,6 +11,7 @@ import (
 	"github.com/cloudnative-pg/cnpg-i/pkg/lifecycle"
 	"github.com/cloudnative-pg/machinery/pkg/log"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/utils/ptr"
 
 	"github.com/xataio/cnpg-i-scale-to-zero/internal/config"
 )
@@ -103,39 +104,7 @@ func (impl Implementation) reconcileMetadata(
 
 	mutatedPod := pod.DeepCopy()
 
-	sidecarContainer := &corev1.Container{
-		Name:  "scale-to-zero",
-		Image: impl.sidecarImage,
-		Env: []corev1.EnvVar{
-			{
-				Name:  "NAMESPACE",
-				Value: pod.Namespace,
-			},
-			{
-				Name:  "CLUSTER_NAME",
-				Value: cluster.Name,
-			},
-			{
-				Name:  "POD_NAME",
-				Value: pod.Name,
-			},
-			{
-				Name:  "LOG_LEVEL",
-				Value: impl.logLevel,
-			},
-		},
-		// Mount the scratch-data volume (created by CNPG) so the sidecar can
-		// reach postgres over its Unix socket at /controller/run/.s.PGSQL.5432.
-		// Auth is peer + ident map; both containers run as the pod-level UID 26.
-		VolumeMounts: []corev1.VolumeMount{
-			{
-				Name:      "scratch-data",
-				MountPath: "/controller/run",
-				SubPath:   "run",
-			},
-		},
-		Resources: impl.sidecarResources,
-	}
+	sidecarContainer := impl.sidecarContainer(pod.Namespace, cluster.Name, pod.Name)
 
 	logger.Info("injecting sidecar into cluster pod",
 		"namespace", pod.Namespace,
@@ -161,6 +130,68 @@ func (impl Implementation) reconcileMetadata(
 	return &lifecycle.OperatorLifecycleResponse{
 		JsonPatch: patch,
 	}, nil
+}
+
+// sidecarContainer returns the scale-to-zero sidecar container to inject
+// into a CNPG instance pod.
+func (impl Implementation) sidecarContainer(
+	namespace string,
+	clusterName string,
+	podName string,
+) *corev1.Container {
+	return &corev1.Container{
+		Name:  "scale-to-zero",
+		Image: impl.sidecarImage,
+		Env: []corev1.EnvVar{
+			{
+				Name:  "NAMESPACE",
+				Value: namespace,
+			},
+			{
+				Name:  "CLUSTER_NAME",
+				Value: clusterName,
+			},
+			{
+				Name:  "POD_NAME",
+				Value: podName,
+			},
+			{
+				Name:  "LOG_LEVEL",
+				Value: impl.logLevel,
+			},
+		},
+		// Mount the scratch-data volume (created by CNPG) so the sidecar can
+		// reach postgres over its Unix socket at /controller/run/.s.PGSQL.5432.
+		// Auth is peer + ident map; both containers run as the pod-level UID 26.
+		VolumeMounts: []corev1.VolumeMount{
+			{
+				Name:      "scratch-data",
+				MountPath: "/controller/run",
+				SubPath:   "run",
+			},
+		},
+		Resources:       impl.sidecarResources,
+		SecurityContext: sidecarSecurityContext(),
+	}
+}
+
+// sidecarSecurityContext returns the container security context for the
+// sidecar. It drops all capabilities, prevents privilege escalation, makes
+// the root filesystem read-only, requires a non-root user, and applies the
+// runtime's default seccomp profile.
+func sidecarSecurityContext() *corev1.SecurityContext {
+	return &corev1.SecurityContext{
+		AllowPrivilegeEscalation: ptr.To(false),
+		Privileged:               ptr.To(false),
+		ReadOnlyRootFilesystem:   ptr.To(true),
+		RunAsNonRoot:             ptr.To(true),
+		Capabilities: &corev1.Capabilities{
+			Drop: []corev1.Capability{"ALL"},
+		},
+		SeccompProfile: &corev1.SeccompProfile{
+			Type: corev1.SeccompProfileTypeRuntimeDefault,
+		},
+	}
 }
 
 // GetKind gets the Kubernetes object kind from its JSON representation
