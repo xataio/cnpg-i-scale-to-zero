@@ -7,6 +7,7 @@ import (
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	"github.com/cloudnative-pg/machinery/pkg/log"
 	"github.com/spf13/viper"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
@@ -14,7 +15,6 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/scheme"
 
 	"github.com/xataio/cnpg-i-scale-to-zero/pkg/metadata"
 )
@@ -81,11 +81,10 @@ func generateScheme(ctx context.Context) *runtime.Scheme {
 
 	// Proceed with custom registration of the CNPG scheme
 	schemeGroupVersion := schema.GroupVersion{Group: cnpgGroup, Version: cnpgVersion}
-	schemeBuilder := &scheme.Builder{GroupVersion: schemeGroupVersion}
-	schemeBuilder.Register(
+	result.AddKnownTypes(schemeGroupVersion,
 		&cnpgv1.Cluster{}, &cnpgv1.ClusterList{},
 		&cnpgv1.ScheduledBackup{}, &cnpgv1.ScheduledBackupList{})
-	utilruntime.Must(schemeBuilder.AddToScheme(result))
+	metav1.AddToGroupVersion(result, schemeGroupVersion)
 
 	schemeLog := log.FromContext(ctx)
 	schemeLog.Info("CNPG types registration", "schemeGroupVersion", schemeGroupVersion)
