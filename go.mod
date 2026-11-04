@@ -1,6 +1,6 @@
 module github.com/xataio/cnpg-i-scale-to-zero
 
-go 1.26.3
+go 1.27.3
 
 require (
 	github.com/cloudnative-pg/cloudnative-pg v1.26.1
