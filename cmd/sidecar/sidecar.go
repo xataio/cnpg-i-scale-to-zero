@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/cloudnative-pg/machinery/pkg/log"
@@ -31,13 +32,26 @@ func newCmd() *cobra.Command {
 			cmd.SetContext(log.IntoContext(cmd.Context(), log.GetLogger()))
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			requiredSettings := []string{
+				"namespace",
+				"cluster-name",
+				"pod-name",
+			}
+
+			for _, k := range requiredSettings {
+				if len(viper.GetString(k)) == 0 {
+					return fmt.Errorf("missing required %s setting", k)
+				}
+			}
+
 			return sidecar.Start(cmd.Context())
 		},
 	}
 
 	_ = viper.BindEnv("log-level", "LOG_LEVEL")
-	_ = viper.BindEnv("listen-address", "LISTEN_ADDRESS")
-	viper.SetDefault("listen-address", ":9188")
+	_ = viper.BindEnv("namespace", "NAMESPACE")
+	_ = viper.BindEnv("cluster-name", "CLUSTER_NAME")
+	_ = viper.BindEnv("pod-name", "POD_NAME")
 
 	return cmd
 }
