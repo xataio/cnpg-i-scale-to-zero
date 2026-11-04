@@ -13,12 +13,10 @@ import (
 	"github.com/cloudnative-pg/machinery/pkg/log"
 	"github.com/xataio/cnpg-i-scale-to-zero/internal/config"
 	"github.com/xataio/cnpg-i-scale-to-zero/internal/scaletozero"
-	"github.com/xataio/cnpg-i-scale-to-zero/pkg/hibernation"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -89,19 +87,9 @@ type Scraper struct {
 	hibernateAttempts       metric.Int64Counter
 	eligibleTargets         metric.Int64Gauge
 	pendingInactiveClusters metric.Int64Gauge
-	hibernator              hibernation.Hibernator
 
 	mu         sync.Mutex
 	lastActive map[types.NamespacedName]time.Time
-}
-
-type Option func(*Scraper)
-
-// WithHibernator replaces the default CNPG hibernation behavior.
-func WithHibernator(hibernator hibernation.Hibernator) Option {
-	return func(scraper *Scraper) {
-		scraper.hibernator = hibernator
-	}
 }
 
 type clusterResult struct {
@@ -110,7 +98,7 @@ type clusterResult struct {
 	inactivityWindow bool
 }
 
-func New(kubeClient client.Client, connectionsClient ConnectionsClient, cfg config.ScraperConfig, meter metric.Meter, options ...Option) (*Scraper, error) {
+func New(kubeClient client.Client, connectionsClient ConnectionsClient, cfg config.ScraperConfig, meter metric.Meter) (*Scraper, error) {
 	cfg = cfg.WithDefaults()
 	if connectionsClient == nil {
 		connectionsClient = NewHTTPConnectionsClient(cfg.Timeout)
@@ -163,7 +151,7 @@ func New(kubeClient client.Client, connectionsClient ConnectionsClient, cfg conf
 		return nil, fmt.Errorf("create pending inactive clusters gauge: %w", err)
 	}
 
-	result := &Scraper{
+	return &Scraper{
 		client:                  kubeClient,
 		connectionsClient:       connectionsClient,
 		cfg:                     cfg,
@@ -174,12 +162,7 @@ func New(kubeClient client.Client, connectionsClient ConnectionsClient, cfg conf
 		eligibleTargets:         eligibleTargets,
 		pendingInactiveClusters: pendingInactiveClusters,
 		lastActive:              make(map[types.NamespacedName]time.Time),
-	}
-	result.hibernator = &defaultHibernator{client: kubeClient}
-	for _, apply := range options {
-		apply(result)
-	}
-	return result, nil
+	}, nil
 }
 
 func (s *Scraper) Start(ctx context.Context) error {
@@ -362,6 +345,9 @@ func (s *Scraper) processCluster(ctx context.Context, cluster *cnpgv1.Cluster, n
 	}
 	s.hibernateAttempts.Add(ctx, 1, metric.WithAttributes(attribute.String(scrapeResultAttribute, scrapeResultSuccess)))
 	result.inactivityWindow = false
+	if err := s.pauseScheduledBackup(ctx, cluster); err != nil {
+		logger.Error(err, "scheduled backup pause error")
+	}
 	return result
 }
 
@@ -381,56 +367,27 @@ func (s *Scraper) hibernate(ctx context.Context, cluster *cnpgv1.Cluster) error 
 		return nil
 	}
 
-	return s.hibernator.Hibernate(ctx, hibernation.Target{
-		Key:             key,
-		UID:             latest.UID,
-		OwnerReferences: append([]metav1.OwnerReference(nil), latest.OwnerReferences...),
-	})
+	patchBase := latest.DeepCopy()
+	if latest.Annotations == nil {
+		latest.Annotations = make(map[string]string)
+	}
+	latest.Annotations[scaletozero.HibernationAnnotation] = scaletozero.HibernationAnnotationValueOn
+	return s.client.Patch(ctx, latest, client.MergeFrom(patchBase))
 }
 
-type defaultHibernator struct {
-	client client.Client
-}
-
-func (h *defaultHibernator) Hibernate(ctx context.Context, target hibernation.Target) error {
-	cluster := &cnpgv1.Cluster{}
-	if err := h.client.Get(ctx, target.Key, cluster); err != nil {
-		return fmt.Errorf("retrieve cluster: %w", err)
-	}
-	if cluster.UID != target.UID {
-		return fmt.Errorf("cluster UID changed")
-	}
-	if cluster.Status.Phase != scaletozero.HealthyClusterStatus {
-		return nil
-	}
-	if cluster.Annotations != nil && cluster.Annotations[scaletozero.HibernationAnnotation] == scaletozero.HibernationAnnotationValueOn {
-		return nil
-	}
-
-	patchBase := cluster.DeepCopy()
-	if cluster.Annotations == nil {
-		cluster.Annotations = make(map[string]string)
-	}
-	cluster.Annotations[scaletozero.HibernationAnnotation] = scaletozero.HibernationAnnotationValueOn
-	if err := h.client.Patch(ctx, cluster, client.MergeFrom(patchBase)); err != nil {
-		return err
-	}
-
+func (s *Scraper) pauseScheduledBackup(ctx context.Context, cluster *cnpgv1.Cluster) error {
 	scheduledBackup := &cnpgv1.ScheduledBackup{}
-	if err := h.client.Get(ctx, target.Key, scheduledBackup); err != nil {
+	key := types.NamespacedName{Namespace: cluster.Namespace, Name: cluster.Name}
+	if err := s.client.Get(ctx, key, scheduledBackup); err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil
 		}
-		log.FromContext(ctx).Error(err, "scheduled backup lookup error")
-		return nil
+		return fmt.Errorf("get scheduled backup: %w", err)
 	}
 
-	backupPatchBase := scheduledBackup.DeepCopy()
+	patchBase := scheduledBackup.DeepCopy()
 	scheduledBackup.Spec.Suspend = ptr.To(true)
-	if err := h.client.Patch(ctx, scheduledBackup, client.MergeFrom(backupPatchBase)); err != nil {
-		log.FromContext(ctx).Error(err, "scheduled backup pause error")
-	}
-	return nil
+	return s.client.Patch(ctx, scheduledBackup, client.MergeFrom(patchBase))
 }
 
 func (s *Scraper) getLastActive(key types.NamespacedName) (time.Time, bool) {
