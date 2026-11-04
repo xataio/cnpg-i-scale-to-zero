@@ -37,27 +37,25 @@ Kubernetes resources `before` they are submitted to the API server.
 To use this feature, the plugin must specify the resource and operation it wants
 to be notified of.
 
-Some examples of what can be achieved through the lifecycle:
+Some examples of what it can be achieved through the lifecycle:
 
 - add volume, volume mounts, sidecar containers, labels, annotations to pods,
   especially necessary when implementing custom backup solutions
 - modify any resource with some annotations or labels
 - add/remove finalizers
 
-[API reference](https://github.com/cloudnative-pg/cnpg-i/blob/main/proto/operator_lifecycle.proto)
+[API reference](https://github.com/cloudnative-pg/cnpg-i/blob/main/proto/operator_lifecycle.proto):
 
-The scale-to-zero plugin uses this to inject a passive sidecar container into
-PostgreSQL pods. The central plugin deployment scrapes the current primary pod
-and hibernates clusters when successful probe data shows inactivity for the
-configured duration.
+The scale-to-zero plugin uses this to inject a sidecar container into the primary
+PostgreSQL pod that monitors database activity and can automatically hibernate the
+cluster when it's inactive for a specified duration.
 
 ## Implementation
 
 ### Identity
 
-1. Define a struct inside the
-   [`internal/plugin/identity`](../internal/plugin/identity) package that
-   implements the CNPG-I `identity.IdentityServer` interface.
+1. Define a struct inside the `internal/identity` package that implements
+   the `pluginhelper.IdentityServer` interface.
 
 2. Implement the following methods:
 
@@ -65,16 +63,15 @@ configured duration.
    - `GetPluginCapabilities`: specify the features supported by the plugin. In
      the scale-to-zero plugin, only the
      `PluginCapability_Service_TYPE_LIFECYCLE_SERVICE` is defined in the
-     corresponding Go [file](../internal/plugin/identity/impl.go).
+     corresponding Go [file](../internal/identity/impl.go).
    - `Probe`: indicate whether the plugin is ready to serve requests; this
-     implementation currently always reports ready.
+     plugin is stateless, so it will always be ready.
 
 ### Lifecycle
 
 This plugin implements the lifecycle service capabilities to inject a sidecar
-container into PostgreSQL pods. The `OperatorLifecycleServer` interface is
-implemented in
-[`internal/plugin/lifecycle`](../internal/plugin/lifecycle).
+container into PostgreSQL pods. The `OperatorLifecycleServer` interface is implemented
+inside the `internal/lifecycle` package.
 
 The `OperatorLifecycleServer` interface requires several methods:
 
@@ -89,72 +86,72 @@ The `OperatorLifecycleServer` interface requires several methods:
 
 The scale-to-zero plugin specifically:
 
-- Handles Pod create and evaluate operations
+- Monitors Pod creation events
 - Injects a sidecar container into all PostgreSQL cluster pods
-- Copies CNPG's `PGHOST` and `PGPORT` values and the matching Unix socket mount
-  into the sidecar
-- The central scraper watches clusters, scheduled backups, and pods
-- The scraper probes only the cached current primary pod
-- The scraper manages hibernation and scheduled backup suspension
+- The sidecar on the primary monitors database activity and hibernates inactive clusters
+- The sidecar on the replicas remains passive until they are promoted to primary
+- Manages scheduled backups by pausing them during hibernation
 
 ### Sidecar Implementation
 
-The sidecar is a separate component that runs alongside the PostgreSQL container.
-It's implemented in the `internal/sidecar` package and exposes passive activity
-data over HTTP.
+The sidecar is a separate component that runs alongside the PostgreSQL container
+in the primary pod. It's implemented in the `internal/sidecar` package and provides
+the core scale-to-zero functionality.
 
-#### Sidecar Startup ([`sidecar.go`](../internal/sidecar/sidecar.go))
+#### Sidecar Manager (`sidecar_manager.go`)
 
-The sidecar startup code:
+The sidecar manager handles the startup and configuration of the sidecar process:
 
-- Reads the probe listen address
-- Serves `GET /connections` on the configured listen address
+- Sets up the Kubernetes client and controller manager
+- Configures the runtime scheme to work with CNPG resources
+- Starts the scale-to-zero monitoring process
+- Supports custom CNPG group/version through environment variables
 
-#### Activity Probe ([`probe.go`](../internal/sidecar/probe.go))
+#### Scale-to-Zero Logic (`scale_to_zero.go`)
 
-The sidecar connections probe reports PostgreSQL connection counts:
+The main scale-to-zero functionality monitors database activity and hibernates inactive clusters:
 
-- **Connections Probe**: Connects to PostgreSQL over the CNPG Unix socket and
-  checks for open connections
-- **HTTP API**: Returns the open connection count as a JSON integer from
-  `GET /connections`
-- **Error Handling**: PostgreSQL errors return non-200 responses, so the central
-  scraper treats the result as unknown rather than inactive
+- **Activity Monitoring**: Connects to PostgreSQL to check for open connections
+- **Switchover Handling**: Automatically detects primary changes and transfers monitoring responsibility
+- **Configurable Inactivity Threshold**: Uses the `xata.io/scale-to-zero-inactivity-minutes`
+  annotation to determine when a cluster should be hibernated (defaults to 30 minutes)
+- **Hibernation**: Sets the `cnpg.io/hibernation` annotation to scale the cluster to zero
+- **Scheduled Backup Management**: Automatically pauses scheduled backups when hibernating clusters to prevent backup failures on inactive clusters
 
 Key features:
 
+- Periodic checks at configurable intervals (default: 1 minute)
 - PostgreSQL connection pooling for activity monitoring
 - Graceful shutdown on context cancellation
-- No Kubernetes client, CNPG API dependency, or Kubernetes writes
+- Automatic scheduled backup pause operations
+- Switchover support
 
 #### Environment Variables
 
-The lifecycle hook injects these environment variables into the sidecar:
+The sidecar requires several environment variables that are automatically injected
+by the lifecycle hook:
 
 - `LOG_LEVEL`: The log level for the sidecar
-- `LISTEN_ADDRESS`: The HTTP probe listen address (default: `:9188`)
-- `PGHOST`: The CNPG PostgreSQL Unix socket directory
-- `PGPORT`: The CNPG PostgreSQL server port
+- `NAMESPACE`: The Kubernetes namespace of the PostgreSQL cluster
+- `CLUSTER_NAME`: The name of the PostgreSQL cluster
+- `POD_NAME`: The name of the current pod
 
 ### Startup Command
 
-The plugin runs in its own pod. The executable entry point is
-[`cmd/plugin/plugin.go`](../cmd/plugin/plugin.go), and the command is constructed
-in [`pkg/plugin/plugin.go`](../pkg/plugin/plugin.go).
+The plugin runs in its own pod, and its main command is implemented in
+the [`cmd/plugin.go`](<(../cmd/plugin/plugin.go)>) file.
 
-This function uses the plugin helper library to create a gRPC server and manage
+This function uses the plugin helper library to create a GRPC server and manage
 TLS.
 
-The command passes the identity implementation to `http.CreateMainCmd`,
-constructs the controller-runtime manager and scraper, and registers the
-lifecycle implementation with the gRPC server. The manager and gRPC server
-share a context so either one terminating stops the plugin.
+Plugin developers are expected to use the `pluginhelper.CreateMainCmd`
+to implement the `main` function, passing an implemented `Identity`
+struct.
+
+Further implementations can be registered within the callback function.
 
 ```go
-lifecycle.RegisterOperatorLifecycleServer(
-    server,
-    lifecycleImpl.NewImplementation(cfg),
-)
+lifecycle.RegisterOperatorLifecycleServer(server, lifecycleImpl.Implementation{})
 ```
 
 ## Scale-to-Zero Functionality
@@ -165,17 +162,17 @@ The scale-to-zero plugin automatically hibernates PostgreSQL clusters when they
 are inactive for a specified period. Here's how it operates:
 
 1. **Sidecar Injection**: When a PostgreSQL pod is created, the plugin injects a
-   sidecar container that exposes database activity to the central scraper.
+   sidecar container that monitors database activity.
 
-2. **Activity Monitoring**: The central scraper watches CNPG objects and scrapes
-   the primary pod sidecar over HTTP.
+2. **Activity Monitoring**: The sidecar periodically connects to PostgreSQL to check open database connections.
 
 3. **Hibernation**: When the cluster has been inactive for the configured duration,
-   the central plugin sets the `cnpg.io/hibernation` annotation on the cluster, causing
+   the primary sidecar sets the `cnpg.io/hibernation` annotation on the cluster, causing
    CloudNativePG to scale it down to zero replicas.
 
-4. **Scheduled Backup Management**: After hibernating a cluster, the plugin
-   pauses the `ScheduledBackup` with the same namespace and name as the cluster.
+4. **Scheduled Backup Management**: After hibernating a cluster, the sidecar automatically
+   pauses any associated scheduled backups to prevent backup operations from failing
+   on hibernated clusters.
 
 ### Configuration
 
@@ -191,76 +188,12 @@ The plugin behavior can be configured through cluster annotations:
 The injected sidecar container is configurable and uses environment-based configuration:
 
 - **Default image**: `ghcr.io/xataio/cnpg-i-scale-to-zero-sidecar:main`
-- **Configurable via**: `SIDECAR_IMAGE` on the plugin deployment
-- Access to PostgreSQL through the shared CNPG Unix socket
-- HTTP connections probe on the port configured by `SIDECAR_SCRAPE_PORT`
-
-### Central Scraper
-
-The plugin process runs a controller-runtime cache and scraper alongside the
-CNPG-I gRPC server:
-
-- Watches CNPG `Cluster`, `ScheduledBackup`, and Kubernetes `Pod` objects
-- Scrapes only `status.currentPrimary`
-- Treats a missing pod, timeout, non-200 response, or invalid response as
-  unknown and resets the inactivity window
-- Patches `cnpg.io/hibernation=on` on the CNPG `Cluster`
-- Pauses the same-name `ScheduledBackup` by setting `spec.suspend=true`
-
-The central scraper is configured on the plugin deployment:
-
-- `SCRAPER_INTERVAL`: Time between scrape cycles (default: `60s`)
-- `SCRAPER_TIMEOUT`: Timeout for each sidecar request (default: `2s`)
-- `SCRAPER_CONCURRENCY`: Maximum concurrent sidecar requests (default: `200`)
-- `SIDECAR_SCRAPE_PORT`: Sidecar HTTP port injected into pods and used for
-  scraping (default: `9188`)
-- `METRICS_ADDRESS`: Plugin metrics listen address (default: `:8080`)
-
-The plugin exposes Prometheus metrics at `/metrics` on the `metrics` service
-port.
+- **Configurable via**: `SIDECAR_IMAGE` environment variable or `--sidecar-image` flag
+- Environment variables for cluster identification
+- Direct access to the PostgreSQL database
+- Kubernetes API access for cluster and scheduled backup management
+- Configurable check intervals and inactivity thresholds
 
 ## Build and deploy the plugin
 
-For installation instructions, see the [installation guide](../INSTALL.md).
-
-Build and test from source:
-
-```bash
-make build
-make test
-make lint
-make docker-build-dev
-```
-
-Regenerate `manifest.yaml` after changing files under `kubernetes/`:
-
-```bash
-make manifest
-```
-
-### Local testing with Tilt
-
-The root `Tiltfile` installs cert-manager and CloudNativePG, builds the plugin
-and sidecar images, deploys the plugin, and applies
-`doc/examples/cluster-example.yaml`. It uses the current Kubernetes context:
-
-```bash
-tilt up
-```
-
-For an isolated kind environment:
-
-```bash
-kind create cluster --name s2z
-tilt up
-```
-
-Verify the injected sidecar:
-
-```bash
-kubectl get pod -l cnpg.io/cluster=cluster-example,role=primary \
-  -o jsonpath='{.items[0].spec.containers[*].name}'
-kubectl logs deployment/scale-to-zero -n cnpg-system
-```
-
-The example cluster uses a two-minute inactivity threshold.
+For more information about deploying the plugin, check out the [install documentation](../INSTALL.md).
